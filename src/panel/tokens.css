@@ -1,0 +1,58 @@
+/*
+ * 跟随 Cocos Creator 编辑器主题。
+ * 面板 document.body 上有编辑器的 --color-* 变量；这里优先引用它们，
+ * 并用从 3.8.8 深色主题实测的色值做 fallback，避免出现“编辑器深色、插件浅色”。
+ */
+:host {
+  /* base surfaces（Cocos 3.8.8 深色） */
+  --ink-900: #141414;
+  --ink-800: #1f1f1f;
+  --ink-700: var(--color-normal-fill, #2b2b2b);
+  --ink-600: var(--color-default-fill, #3d3d3d);
+
+  --line: var(--color-default-border, #3d3d3d);
+  --line-strong: var(--color-active-fill, #525252);
+
+  /* text */
+  --fg: var(--color-normal-contrast, #cccccc);
+  --fg-dim: #a3a3a3;
+  --fg-faint: #707070;
+
+  /* accent / status（Cocos primary/success/danger/info） */
+  --accent: var(--color-primary-fill, #40aaca);
+  --accent-strong: var(--color-primary-fill-weaker, #65bdd7);
+  --accent-soft: var(--color-primary-fill-weakest, #afdfee);
+  --success: var(--color-success-fill, #64daaf);
+  --danger: var(--color-danger-fill, #d85f6f);
+  --warning: #f1a348;
+  --info: var(--color-info-fill, #227f9b);
+  --yellow: #fbd461;
+  --on-accent: var(--color-primary-contrast, #fafafa);
+
+  /* 兼容现有组件的语义别名（颜色已换成 Cocos 同色系） */
+  --amber: var(--accent);
+  --jade: var(--success);
+  --cinnabar: var(--danger);
+  --violet: var(--yellow);
+  --cobalt: var(--accent-strong);
+
+  --font-ui: BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei",
+    "Noto Sans CJK SC", "Helvetica Neue", Arial, sans-serif;
+  --font-mono: "JetBrains Mono", "Cascadia Code", "SF Mono", Consolas, monospace;
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-6: 24px;
+
+  /* Cocos 编辑器偏紧凑、偏方，圆角比原设计更小 */
+  --radius-msg: 6px;
+  --radius-card: 4px;
+  --radius-input: 4px;
+
+  --shadow-card: 0 1px 2px rgb(0 0 0 / 0.35);
+  --shadow-pop: 0 8px 24px rgb(0 0 0 / 0.45);
+
+  color-scheme: dark;
+}

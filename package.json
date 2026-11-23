@@ -1,0 +1,403 @@
+{
+  "package_version": 2,
+  "name": "cocos-ai-agent",
+  "version": "0.1.0",
+  "author": "Stk-BossLiu",
+  "editor": ">=3.8.5",
+  "description": "i18n:cocos-ai-agent.description",
+  "main": "./dist/main.js",
+  "scripts": {
+    "dev": "vite build --watch --mode development",
+    "build": "npm run typecheck && vite build && node scripts/postbuild.mjs",
+    "typecheck": "vue-tsc --noEmit -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.25.1",
+    "highlight.js": "^11.11.1",
+    "markdown-it": "^14.1.0",
+    "vue": "^3.5.13"
+  },
+  "devDependencies": {
+    "@cocos-fe/vite-plugin-cocos-panel": "^1.0.3",
+    "@cocos/creator-types": "^3.8.8",
+    "@types/markdown-it": "^14.1.2",
+    "@types/node": "^22.15.21",
+    "@vitejs/plugin-vue": "^5.2.2",
+    "rollup-plugin-node-externals": "^7.1.3",
+    "typescript": "^5.8.2",
+    "vite": "^5.4.1",
+    "vitest": "^2.1.9",
+    "vue-tsc": "^2.1.10"
+  },
+  "panels": {
+    "default": {
+      "type": "dockable",
+      "main": "./dist/panel.js",
+      "title": "i18n:cocos-ai-agent.panel_title",
+      "size": {
+        "width": 1024,
+        "height": 780,
+        "min-width": 720,
+        "min-height": 520
+      },
+      "flags": {
+        "resizable": true,
+        "save": true
+      }
+    }
+  },
+  "contributions": {
+    "menu": [
+      {
+        "path": "i18n:menu.develop",
+        "label": "i18n:cocos-ai-agent.open_panel",
+        "message": {
+          "target": "cocos-ai-agent",
+          "name": "open-panel"
+        }
+      }
+    ],
+    "messages": {
+      "open-panel": {
+        "methods": [
+          "openPanel"
+        ]
+      },
+      "open-board": {
+        "methods": [
+          "openBoard"
+        ]
+      },
+      "open-chat": {
+        "methods": [
+          "openChat"
+        ]
+      },
+      "open-status": {
+        "methods": [
+          "openStatus"
+        ]
+      },
+      "panel-event": {
+        "public": false,
+        "methods": [
+          "default.onPanelEvent"
+        ]
+      },
+      "panel-ready": {
+        "methods": [
+          "panelReady"
+        ]
+      },
+      "panel-closed": {
+        "methods": [
+          "panelClosed"
+        ]
+      },
+      "approval-respond": {
+        "methods": [
+          "approvalRespond"
+        ]
+      },
+      "graph-list": {
+        "methods": [
+          "graphList"
+        ]
+      },
+      "graph-load": {
+        "methods": [
+          "graphLoad"
+        ]
+      },
+      "graph-save": {
+        "methods": [
+          "graphSave"
+        ]
+      },
+      "graph-create": {
+        "methods": [
+          "graphCreate"
+        ]
+      },
+      "graph-delete": {
+        "methods": [
+          "graphDelete"
+        ]
+      },
+      "graph-import": {
+        "methods": [
+          "graphImport"
+        ]
+      },
+      "graph-export": {
+        "methods": [
+          "graphExport"
+        ]
+      },
+      "graph-duplicate": {
+        "methods": [
+          "graphDuplicate"
+        ]
+      },
+      "graph-validate": {
+        "methods": [
+          "graphValidate"
+        ]
+      },
+      "graph-node-types": {
+        "methods": [
+          "graphNodeTypes"
+        ]
+      },
+      "graph-run": {
+        "methods": [
+          "graphRun"
+        ]
+      },
+      "graph-run-pause": {
+        "methods": [
+          "graphRunPause"
+        ]
+      },
+      "graph-run-resume": {
+        "methods": [
+          "graphRunResume"
+        ]
+      },
+      "graph-run-cancel": {
+        "methods": [
+          "graphRunCancel"
+        ]
+      },
+      "graph-human-respond": {
+        "methods": [
+          "graphHumanRespond"
+        ]
+      },
+      "graph-run-list": {
+        "methods": [
+          "graphRunList"
+        ]
+      },
+      "graph-run-load": {
+        "methods": [
+          "graphRunLoad"
+        ]
+      },
+      "graph-artifact-read": {
+        "methods": [
+          "graphArtifactRead"
+        ]
+      },
+      "graph-run-delete": {
+        "methods": [
+          "graphRunDelete"
+        ]
+      },
+      "graph-run-open-dir": {
+        "methods": [
+          "graphRunOpenDir"
+        ]
+      },
+      "app-info": {
+        "methods": [
+          "appInfo"
+        ]
+      },
+      "settings-get": {
+        "methods": [
+          "settingsGet"
+        ]
+      },
+      "settings-set": {
+        "methods": [
+          "settingsSet"
+        ]
+      },
+      "model-profiles-get": {
+        "methods": [
+          "modelProfilesGet"
+        ]
+      },
+      "model-profile-save": {
+        "methods": [
+          "modelProfileSave"
+        ]
+      },
+      "model-profile-delete": {
+        "methods": [
+          "modelProfileDelete"
+        ]
+      },
+      "model-profile-validate": {
+        "methods": [
+          "modelProfileValidate"
+        ]
+      },
+      "model-profile-apply": {
+        "methods": [
+          "modelProfileApply"
+        ]
+      },
+      "model-list-models": {
+        "methods": [
+          "modelListModels"
+        ]
+      },
+      "model-profile-add-models": {
+        "methods": [
+          "modelProfileAddModels"
+        ]
+      },
+      "model-provider-save": {
+        "methods": [
+          "modelProviderSave"
+        ]
+      },
+      "model-provider-delete": {
+        "methods": [
+          "modelProviderDelete"
+        ]
+      },
+      "model-defaults-set": {
+        "methods": [
+          "modelDefaultsSet"
+        ]
+      },
+      "dependencies-get": {
+        "methods": [
+          "dependenciesGet"
+        ]
+      },
+      "pi-download": {
+        "methods": [
+          "piDownload"
+        ]
+      },
+      "pi-select-path": {
+        "methods": [
+          "piSelectPath"
+        ]
+      },
+      "agent-start": {
+        "methods": [
+          "agentStart"
+        ]
+      },
+      "agent-stop": {
+        "methods": [
+          "agentStop"
+        ]
+      },
+      "agent-restart": {
+        "methods": [
+          "agentRestart"
+        ]
+      },
+      "agent-status": {
+        "methods": [
+          "agentStatus"
+        ]
+      },
+      "agent-prompt": {
+        "methods": [
+          "agentPrompt"
+        ]
+      },
+      "agent-steer": {
+        "methods": [
+          "agentSteer"
+        ]
+      },
+      "agent-follow-up": {
+        "methods": [
+          "agentFollowUp"
+        ]
+      },
+      "agent-abort": {
+        "methods": [
+          "agentAbort"
+        ]
+      },
+      "agent-clear-queue": {
+        "methods": [
+          "agentClearQueue"
+        ]
+      },
+      "agent-state": {
+        "methods": [
+          "agentState"
+        ]
+      },
+      "agent-messages": {
+        "methods": [
+          "agentMessages"
+        ]
+      },
+      "agent-set-model": {
+        "methods": [
+          "agentSetModel"
+        ]
+      },
+      "agent-models": {
+        "methods": [
+          "agentModels"
+        ]
+      },
+      "agent-set-thinking": {
+        "methods": [
+          "agentSetThinking"
+        ]
+      },
+      "agent-thinking-levels": {
+        "methods": [
+          "agentThinkingLevels"
+        ]
+      },
+      "agent-commands": {
+        "methods": [
+          "agentCommands"
+        ]
+      },
+      "agent-compact": {
+        "methods": [
+          "agentCompact"
+        ]
+      },
+      "agent-export": {
+        "methods": [
+          "agentExport"
+        ]
+      },
+      "agent-stats": {
+        "methods": [
+          "agentStats"
+        ]
+      },
+      "agent-new-session": {
+        "methods": [
+          "agentNewSession"
+        ]
+      },
+      "agent-sessions": {
+        "methods": [
+          "agentSessions"
+        ]
+      },
+      "agent-switch-session": {
+        "methods": [
+          "agentSwitchSession"
+        ]
+      },
+      "agent-session-delete": {
+        "methods": [
+          "agentSessionDelete"
+        ]
+      }
+    },
+    "scene": {
+      "script": "./dist/scene-script.js"
+    }
+  }
+}

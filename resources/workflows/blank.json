@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "id": "blank",
+  "name": "空白工作流",
+  "description": "从零开始搭建节点图。",
+  "builtin": true,
+  "version": "1.0.0",
+  "nodes": [],
+  "edges": [],
+  "groups": [],
+  "meta": {
+    "author": "built-in",
+    "tags": [
+      "blank"
+    ]
+  }
+}

@@ -1,0 +1,200 @@
+{
+  "schemaVersion": 1,
+  "id": "playable-plan",
+  "name": "试玩开发计划",
+  "description": "策划输出 + 文案/视频/参考试玩 + 项目分析 → 汇总 → 开发计划 → 人工审核 → dev-plan.md + dev-plan.json",
+  "builtin": true,
+  "version": "1.0.0",
+  "nodes": [
+    {
+      "id": "brief",
+      "type": "input.text",
+      "title": "策划输出",
+      "position": { "x": 40, "y": 40 },
+      "params": { "text": "", "placeholder": "粘贴策划文档或需求" }
+    },
+    {
+      "id": "reference",
+      "type": "input.reference-playable",
+      "title": "参考试玩（可选）",
+      "position": { "x": 40, "y": 220 },
+      "params": { "path": "" },
+      "disabled": true
+    },
+    {
+      "id": "rea",
+      "type": "analysis.rea-reverse",
+      "title": "REA 逆向（可选）",
+      "position": { "x": 330, "y": 220 },
+      "params": {}
+    },
+    {
+      "id": "copy",
+      "type": "input.text",
+      "title": "文案",
+      "position": { "x": 40, "y": 400 },
+      "params": { "text": "", "placeholder": "粘贴文案或补充说明" }
+    },
+    {
+      "id": "copy_understand",
+      "type": "agent.llm",
+      "title": "文案理解",
+      "position": { "x": 330, "y": 400 },
+      "params": {
+        "prompt": "请理解以下试玩文案，提炼卖点、目标用户、核心循环与需要表现的画面。\\n\\n{{input}}"
+      }
+    },
+    {
+      "id": "video",
+      "type": "input.video",
+      "title": "参考视频（可选）",
+      "position": { "x": 40, "y": 580 },
+      "params": { "path": "" },
+      "disabled": true
+    },
+    {
+      "id": "frames",
+      "type": "media.video-frames",
+      "title": "视频截帧 ×30",
+      "position": { "x": 330, "y": 580 },
+      "params": { "count": 30, "maxWidth": 960 }
+    },
+    {
+      "id": "images",
+      "type": "media.image-caption",
+      "title": "图片识别理解",
+      "position": { "x": 620, "y": 580 },
+      "params": {}
+    },
+    {
+      "id": "project_scan",
+      "type": "analysis.project-scan",
+      "title": "分析项目资源与代码",
+      "position": { "x": 330, "y": 760 },
+      "params": { "maxNodes": 500 }
+    },
+    {
+      "id": "merge",
+      "type": "logic.merge",
+      "title": "汇总提炼",
+      "position": { "x": 900, "y": 360 },
+      "params": { "mode": "text", "separator": "\\n\\n---\\n\\n" }
+    },
+    {
+      "id": "plan",
+      "type": "agent.role",
+      "title": "策划 → 开发计划",
+      "position": { "x": 1200, "y": 360 },
+      "params": {
+        "role": "pm",
+        "prompt": "请基于以下上下文产出可直接执行的 H5/Web 试玩开发计划。\\n\\n{{input}}\\n\\n要求：包含 goal/target/coreLoop/scenes/ui/assets/tasks/risks/acceptance/estimatedHours，并在最后输出一个 ```json 代码块，内容必须是完整 dev-plan JSON。"
+      }
+    },
+    {
+      "id": "review",
+      "type": "human.approval",
+      "title": "人工审核开发计划",
+      "position": { "x": 1500, "y": 360 },
+      "params": {
+        "title": "确认开发计划",
+        "description": "请检查开发计划；批准后输出 dev-plan.md 与 dev-plan.json。"
+      }
+    },
+    {
+      "id": "output_md",
+      "type": "output.markdown",
+      "title": "dev-plan.md",
+      "position": { "x": 1800, "y": 280 },
+      "params": { "path": "dev-plan.md" }
+    },
+    {
+      "id": "output_json",
+      "type": "output.json",
+      "title": "dev-plan.json",
+      "position": { "x": 1800, "y": 440 },
+      "params": { "path": "dev-plan.json" }
+    }
+  ],
+  "edges": [
+    {
+      "id": "e-reference-rea",
+      "from": { "node": "reference", "port": "artifact" },
+      "to": { "node": "rea", "port": "artifact" },
+      "optional": true
+    },
+    {
+      "id": "e-video-frames",
+      "from": { "node": "video", "port": "video" },
+      "to": { "node": "frames", "port": "video" },
+      "optional": true
+    },
+    {
+      "id": "e-frames-images",
+      "from": { "node": "frames", "port": "images" },
+      "to": { "node": "images", "port": "images" },
+      "optional": true
+    },
+    {
+      "id": "e-copy-understand",
+      "from": { "node": "copy", "port": "text" },
+      "to": { "node": "copy_understand", "port": "context" }
+    },
+    {
+      "id": "e-brief-merge",
+      "from": { "node": "brief", "port": "text" },
+      "to": { "node": "merge", "port": "values" }
+    },
+    {
+      "id": "e-copy-understand-merge",
+      "from": { "node": "copy_understand", "port": "markdown" },
+      "to": { "node": "merge", "port": "values" }
+    },
+    {
+      "id": "e-images-merge",
+      "from": { "node": "images", "port": "markdown" },
+      "to": { "node": "merge", "port": "values" },
+      "optional": true
+    },
+    {
+      "id": "e-project-merge",
+      "from": { "node": "project_scan", "port": "project" },
+      "to": { "node": "merge", "port": "values" }
+    },
+    {
+      "id": "e-rea-merge",
+      "from": { "node": "rea", "port": "json" },
+      "to": { "node": "merge", "port": "values" },
+      "optional": true
+    },
+    {
+      "id": "e-merge-plan",
+      "from": { "node": "merge", "port": "value" },
+      "to": { "node": "plan", "port": "context" }
+    },
+    {
+      "id": "e-plan-review-md",
+      "from": { "node": "plan", "port": "markdown" },
+      "to": { "node": "review", "port": "markdown" }
+    },
+    {
+      "id": "e-plan-review-json",
+      "from": { "node": "plan", "port": "json" },
+      "to": { "node": "review", "port": "json" }
+    },
+    {
+      "id": "e-review-md",
+      "from": { "node": "review", "port": "markdown" },
+      "to": { "node": "output_md", "port": "markdown" }
+    },
+    {
+      "id": "e-review-json",
+      "from": { "node": "review", "port": "json" },
+      "to": { "node": "output_json", "port": "json" }
+    }
+  ],
+  "groups": [],
+  "meta": {
+    "author": "built-in",
+    "tags": ["playable", "planning"]
+  }
+}
