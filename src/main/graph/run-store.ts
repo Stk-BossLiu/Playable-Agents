@@ -1,7 +1,7 @@
 import { promises as fsp } from 'node:fs';
-import { extname, join, resolve } from 'node:path';
+import { extname, join, relative, resolve } from 'node:path';
 import type { GraphRunResult } from './engine';
-import { assertInside, readJson, writeJsonAtomic } from '../utils/fs';
+import { assertInside, isInside, readJson, writeJsonAtomic } from '../utils/fs';
 
 export interface RunSummary {
   runId: string;
@@ -75,7 +75,11 @@ export class RunStore {
   }
 
   async readArtifact(path: string, maxBytes = 2 * 1024 * 1024): Promise<ArtifactReadResult> {
-    const target = assertInside(this.workflowsRoot, resolve(path));
+    const docs = join(this.projectRoot, 'docs', 'cocos-ai-agent');
+    const root = isInside(docs, path) ? docs : this.workflowsRoot;
+    const lexical = assertInside(root, resolve(path));
+    const project = await fsp.realpath(this.projectRoot);
+    const target = assertInside(resolve(project, relative(this.projectRoot, root)), await fsp.realpath(lexical));
     const stat = await fsp.stat(target);
     if (stat.size > maxBytes) {
       throw new Error(`产物超过预览上限（${stat.size} > ${maxBytes} 字节）。`);

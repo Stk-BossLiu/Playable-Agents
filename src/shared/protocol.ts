@@ -17,6 +17,7 @@ export const MessageName = {
   SettingsGet: 'settings-get',
   SettingsSet: 'settings-set',
   PiDownload: 'pi-download',
+  ReaInstall: 'rea-install',
   PiSelectPath: 'pi-select-path',
 
   // Phase 1: agent lifecycle

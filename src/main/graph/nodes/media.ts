@@ -1,3 +1,4 @@
+import { playableNode } from '../playable/node';
 import { execFile } from 'node:child_process';
 import { promises as fsp } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -159,37 +160,7 @@ export const mediaNodes: NodeDefinition[] = [
       return { outputs: { project } };
     },
   },
-  {
-    type: 'analysis.rea-reverse',
-    category: 'analysis',
-    label: 'REA 逆向',
-    description: '可选参考试玩逆向；未配置 REA 或未提供输入时返回 available:false，不阻塞计划。',
-    inputs: [{ name: 'artifact', type: 'artifact', required: false }],
-    outputs: [{ name: 'json', type: 'json', required: true }],
-    paramsSchema: {
-      type: 'object',
-      properties: {
-        prompt: { type: 'string', description: '逆向侧重点' },
-      },
-      additionalProperties: true,
-    },
-    requires: ['rea'],
-    async run(ctx) {
-      const input = ctx.inputs.artifact;
-      if (!input) {
-        return { outputs: { json: { available: false, reason: '未提供参考试玩' } } };
-      }
-      ctx.log('warn', 'REA 逆向节点尚未启用；返回 available:false');
-      return {
-        outputs: {
-          json: {
-            available: false,
-            reason: 'REA MCP 未配置或未实现调用；参考试玩可手动提供 UI/流程说明',
-          },
-        },
-      };
-    },
-  },
+  playableNode,
 ];
 
 /** Keep editor import metadata out of report prompts. Explicit sampling prevents false absence claims. */

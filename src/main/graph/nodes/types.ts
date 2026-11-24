@@ -72,6 +72,7 @@ export type AgentNodeRunner = (
 ) => Promise<AgentRunResult>;
 
 export interface NodeRunContext {
+  projectRoot: string;
   runId: string;
   graph: GraphDocument;
   node: GraphNode;

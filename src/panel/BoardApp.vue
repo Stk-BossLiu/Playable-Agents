@@ -2,12 +2,15 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
 import type { GraphDocument, GraphEdge, GraphNode, GraphSummary } from '../shared/graph';
 import type { ModelProfileView, ModelProfilesDTO } from '../shared/models';
-import { groupModelProviders } from './model-providers';
+import { isLocalPlayableHtml, PLAYABLE_AGENT_TYPE, PLAYABLE_SYSTEM_PROMPT } from '../shared/playable';
+import ProviderModelSelect from './components/ProviderModelSelect.vue';
 import { request, requestRetry } from './api';
 import { locale, t } from './i18n';
 import { setToast, state, type GraphRunView } from './store';
 import ViewTabs from './components/ViewTabs.vue';
 import ApprovalBar from './components/ApprovalBar.vue';
+import PlayableSubgraph from './components/PlayableSubgraph.vue';
+import ArtifactPreview from './components/ArtifactPreview.vue';
 
 interface ParamSchema {
   type?: string;
@@ -148,20 +151,10 @@ const canvasBgStyle = computed(() => ({
 const selected = computed(() => current.value?.nodes.find((node) => node.id === selectedId.value) ?? null);
 const selectedType = computed(() => nodeTypes.value.find((type) => type.type === selected.value?.type) ?? null);
 const selectedParams = computed(() => (selected.value?.params ?? {}) as Record<string, unknown>);
-const roleProviders = computed(() => groupModelProviders(modelProfiles.value));
-const roleProfile = computed(() => {
-  const { provider, model, modelProfileId } = selectedParams.value;
-  return provider && model
-    ? modelProfiles.value.find((profile) => profile.providerId === provider && profile.modelId === model)
-    : modelProfiles.value.find((profile) => profile.id === modelProfileId);
-});
-const roleProvider = computed(() => {
-  const profile = roleProfile.value;
-  return profile && roleProviders.value.find((group) => group.profiles.includes(profile));
-});
-
-function changeRoleProfile(profile?: ModelProfileView): void {
-  if (!selected.value) return;
+const isReverseAgent = computed(() => selected.value?.type === PLAYABLE_AGENT_TYPE || selected.value?.type === 'analysis.rea-reverse');
+const hasModelPicker = computed(() => isReverseAgent.value || selected.value?.type === 'agent.role');
+function changeNodeProfile(profile?: ModelProfileView): void {
+  if (!selected.value || !canEdit.value) return;
   const params = { ...selectedParams.value };
   delete params.modelProfileId;
   if (profile) {
@@ -181,6 +174,23 @@ const paramEntries = computed(() => {
 const canEdit = computed(() => Boolean(current.value) && !builtin.value);
 const runNodes = computed(() => state.graphRun.graphId === current.value?.id ? state.graphRun.nodes : {});
 const selectedResult = computed(() => runNodes.value[selectedId.value]);
+const subgraphNodeId = ref('');
+const inSubgraph = computed(() => Boolean(subgraphNodeId.value) && selected.value?.id === subgraphNodeId.value);
+
+function enterSubgraph(node: GraphNode): void {
+  if (node.type !== 'analysis.rea-reverse') return;
+  selectNode(node);
+  closeContextMenu();
+  pendingFrom.value = null;
+  clearArtifactPreview();
+  subgraphNodeId.value = node.id;
+}
+
+function leaveSubgraph(): void {
+  clearArtifactPreview();
+  subgraphNodeId.value = '';
+  void nextTick(() => canvasEl.value?.querySelector<HTMLButtonElement>('.board-node.selected .subgraph-entry')?.focus());
+}
 const selectedOutputPorts = computed(() => Object.entries(selectedResult.value?.outputs ?? {}).map(([port, value]) => ({
   port, text: formatOutput(value),
 })));
@@ -296,6 +306,13 @@ function onBoardKeyDown(event: KeyboardEvent): void {
 function onKeyDown(event: KeyboardEvent): void {
   // IME 合成过程中的按键（例如输入法里的 Backspace）不参与快捷键。
   if (event.isComposing || event.keyCode === 229) return;
+  if (inSubgraph.value) {
+    if (event.key === 'Escape' && !isEditableEvent(event)) {
+      event.preventDefault();
+      leaveSubgraph();
+    }
+    return;
+  }
   if (event.key === 'Escape') {
     if (contextMenu.value) {
       event.preventDefault();
@@ -361,6 +378,8 @@ async function openGraph(summary: GraphSummary): Promise<void> {
     const loaded = await request<{ graph: GraphDocument; builtin: boolean }>('graph-load', { id: summary.id });
     current.value = normalizeGraph(loaded.graph);
     builtin.value = loaded.builtin;
+    subgraphNodeId.value = '';
+    clearArtifactPreview();
     selectedId.value = '';
     pendingFrom.value = null;
     dirty.value = false;
@@ -587,7 +606,8 @@ function assignPathsToNode(node: GraphNode, paths: string[]): boolean {
       : [];
     params.images = uniquePaths([...current, ...images]);
   } else if ('path' in props) {
-    const path = videos[0] ?? paths[0];
+    const path = node.type === 'input.reference-playable' ? paths.find(isLocalPlayableHtml) : videos[0] ?? paths[0];
+    if (!path) return false;
     const previousPath = typeof params.path === 'string' ? params.path : '';
     const previousName = typeof params.name === 'string' ? params.name : '';
     params.path = path;
@@ -645,6 +665,8 @@ async function dropOnCanvas(event: DragEvent): Promise<void> {
     paths.forEach((path, index) => {
       if (IMAGE_FILE_RE.test(path)) {
         plan.push({ type: 'input.images', params: { images: [path] }, offset: index });
+      } else if (isLocalPlayableHtml(path)) {
+        plan.push({ type: 'input.reference-playable', params: { path, name: fileNameOf(path) }, offset: index });
       } else if (VIDEO_FILE_RE.test(path)) {
         plan.push({ type: 'input.video', params: { path, name: fileNameOf(path) }, offset: index });
       } else {
@@ -706,6 +728,10 @@ async function dropOnParam(event: DragEvent, key: string): Promise<void> {
   }
   const schema = selectedType.value?.paramsSchema?.properties?.[key];
   const kind = schema?.type;
+  if (node.type === 'input.reference-playable' && key === 'path' && !isLocalPlayableHtml(paths[0])) {
+    setToast('warn', '请选择本地 .html 文件');
+    return;
+  }
   if (kind === 'boolean' || kind === 'number' || kind === 'object') {
     setToast('warn', t('board.dropUnsupported'));
     return;
@@ -1432,18 +1458,27 @@ function nodeArtifacts(nodeId: string): Array<{ path?: string; name?: string; ty
   return (runNodes.value[nodeId]?.artifacts ?? state.graphRun.artifacts[nodeId] ?? []) as Array<{ path?: string; name?: string; type?: string }>;
 }
 
+let previewRequest = 0;
+function clearArtifactPreview(): void {
+  previewRequest++;
+  artifactPreview.value = null;
+  artifactLoading.value = false;
+}
+
 async function previewArtifact(artifact: { path?: string; name?: string }): Promise<void> {
   if (!artifact.path) return;
+  const ticket = ++previewRequest;
   artifactLoading.value = true;
   try {
-    artifactPreview.value = await request<{ name: string; mime: string; encoding: string; content: string }>(
+    const preview = await request<{ name: string; mime: string; encoding: string; content: string }>(
       'graph-artifact-read',
       { path: artifact.path },
     );
+    if (ticket === previewRequest) artifactPreview.value = preview;
   } catch (caught) {
     setToast('error', errorText(caught));
   } finally {
-    artifactLoading.value = false;
+    if (ticket === previewRequest) artifactLoading.value = false;
   }
 }
 
@@ -1494,7 +1529,7 @@ async function pickFilesForParam(key: string): Promise<void> {
       title: array ? t('board.pickImages') : t('board.pickFile'),
       type: 'file',
       multi: array,
-      filters: array
+      filters: node.type === 'input.reference-playable' ? [{ name: 'HTML', extensions: ['html'] }] : array
         ? [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp', 'tga', 'psd'] }]
         : [{
             name: 'Files',
@@ -1746,7 +1781,7 @@ function formatTime(timestamp: number): string {
           </div>
         </section>
 
-        <section class="side-section">
+        <section v-if="!inSubgraph" class="side-section">
           <h2>{{ t('board.addNode') }}</h2>
           <select v-model="addType" class="field-select">
             <option v-for="type in nodeTypes" :key="type.type" :value="type.type">{{ type.label }} · {{ type.type }}</option>
@@ -1756,7 +1791,23 @@ function formatTime(timestamp: number): string {
         </section>
       </aside>
 
-      <section class="board-stage">
+      <PlayableSubgraph v-if="inSubgraph && current && selected" :graph-name="current.name" :node-title="selected.title"
+        :result="selectedResult" :logs="state.graphRun.graphId === current.id ? state.graphRun.logs : []"
+        :node-id="selected.id" :artifacts="nodeArtifacts(selected.id)" :loading="artifactLoading"
+        @back="leaveSubgraph" @select="clearArtifactPreview" @preview="previewArtifact">
+        <template #agent>
+          <h4>试玩逆向 Agent</h4>
+          <label v-for="field in (['provider', 'model'] as const)" :key="field" class="field">
+            <span>{{ field === 'provider' ? '提供商' : '模型' }}</span>
+            <ProviderModelSelect :field="field" :profiles="modelProfiles" :params="selectedParams" :disabled="!canEdit"
+              default-label="跟随试玩逆向 Agent 默认配置" @change="changeNodeProfile" />
+          </label>
+          <p v-if="builtin" class="readonly-line">复制工作流后可覆盖此节点的模型。</p>
+          <details><summary>专属系统提示词</summary><p class="reverse-prompt">{{ PLAYABLE_SYSTEM_PROMPT }}</p></details>
+        </template>
+        <ArtifactPreview v-if="artifactPreview" :preview="artifactPreview" @close="clearArtifactPreview" />
+      </PlayableSubgraph>
+      <section v-else class="board-stage">
         <div class="board-toolbar">
           <div class="board-title">
             <strong>{{ current?.name ?? t('board.empty') }}</strong>
@@ -1835,11 +1886,12 @@ function formatTime(timestamp: number): string {
                 height: `${nodeHeight(node)}px`,
               }"
               @pointerdown.stop="selectNode(node)"
+              @dblclick.self="enterSubgraph(node)"
               @dragover="dragOverNode($event, node)"
               @dragleave="dragLeaveNode"
               @drop="dropOnNode($event, node)"
             >
-              <header class="node-head" @pointerdown.stop="dragStart($event, node)">
+              <header class="node-head" @pointerdown.stop="dragStart($event, node)" @dblclick.stop="enterSubgraph(node)">
                 <span class="node-category">{{ nodeTypeOf(node)?.category ?? 'node' }}</span>
                 <strong class="node-title">{{ node.title }}</strong>
                 <span v-if="runNodes[node.id]?.state" class="node-state-dot" :class="`state-${runNodes[node.id]?.state}`"></span>
@@ -1902,6 +1954,8 @@ function formatTime(timestamp: number): string {
               </div>
               <footer class="node-foot">
                 <span>{{ node.type }}</span>
+                <button v-if="node.type === 'analysis.rea-reverse'" type="button" class="link-btn subgraph-entry"
+                  @pointerdown.stop @click.stop="enterSubgraph(node)">进入子图 ↗</button>
                 <span v-if="runNodes[node.id]?.cached">cache</span>
               </footer>
             </article>
@@ -1970,7 +2024,7 @@ function formatTime(timestamp: number): string {
         </section>
       </section>
 
-      <aside class="board-inspector">
+      <aside v-if="!inSubgraph" class="board-inspector">
         <div class="side-head">
           <h3>{{ t('board.inspector') }}</h3>
           <span v-if="selected" class="tag">{{ selected.type }}</span>
@@ -1986,6 +2040,7 @@ function formatTime(timestamp: number): string {
             <span>{{ t('board.disabled') }}</span>
           </label>
 
+          <button v-if="selected.type === 'analysis.rea-reverse'" type="button" class="btn wide" @click="enterSubgraph(selected)">进入分析子图 ↗</button>
           <section v-if="selectedResult" class="node-result-detail">
             <h4 class="inspector-subtitle">{{ t('board.nodeResult') }} · {{ runStateLabel(selectedResult.state) }}<template v-if="selectedResult.durationMs !== undefined"> · {{ selectedResult.durationMs }} ms</template></h4>
             <pre v-if="selectedResult.error">{{ selectedResult.error }}</pre>
@@ -2020,24 +2075,9 @@ function formatTime(timestamp: number): string {
             @drop="dropOnParam($event, entry.key)"
           >
             <span>{{ entry.key }}</span>
-            <select
-              v-if="selected.type === 'agent.role' && entry.key === 'provider'"
-              :value="roleProvider?.key ?? ''"
-              :disabled="!canEdit"
-              @change="changeRoleProfile(roleProviders.find(group => group.key === ($event.target as HTMLSelectElement).value)?.profiles[0])"
-            >
-              <option value="">{{ t('board.useDefault') }}</option>
-              <option v-for="group in roleProviders" :key="group.key" :value="group.key">{{ group.name }}</option>
-            </select>
-            <select
-              v-else-if="selected.type === 'agent.role' && entry.key === 'model'"
-              :value="roleProfile?.id ?? ''"
-              :disabled="!canEdit || !roleProvider"
-              @change="changeRoleProfile(roleProvider?.profiles.find(profile => profile.id === ($event.target as HTMLSelectElement).value))"
-            >
-              <option v-if="!roleProvider" value="">{{ t('board.useDefault') }}</option>
-              <option v-for="profile in roleProvider?.profiles" :key="profile.id" :value="profile.id">{{ profile.modelId }}</option>
-            </select>
+            <ProviderModelSelect v-if="hasModelPicker && (entry.key === 'provider' || entry.key === 'model')"
+              :field="entry.key" :profiles="modelProfiles" :params="selectedParams" :disabled="!canEdit"
+              :default-label="isReverseAgent ? '跟随试玩逆向 Agent 默认配置' : undefined" @change="changeNodeProfile" />
             <select
               v-else-if="modelSelectOptions(entry.key).length"
               :value="String(selectedParams[entry.key] ?? '')"
@@ -2109,19 +2149,7 @@ function formatTime(timestamp: number): string {
             </button>
           </div>
 
-          <div v-if="artifactPreview" class="artifact-preview">
-            <div class="side-head">
-              <strong>{{ artifactPreview.name }}</strong>
-              <button type="button" class="link-btn" @click="artifactPreview = null">×</button>
-            </div>
-            <img
-              v-if="artifactPreview.mime.startsWith('image/')"
-              :src="`data:${artifactPreview.mime};base64,${artifactPreview.content}`"
-              :alt="artifactPreview.name"
-            />
-            <pre v-else-if="artifactPreview.encoding === 'utf8'">{{ artifactPreview.content }}</pre>
-            <p v-else class="muted">二进制产物（{{ artifactPreview.mime }}）</p>
-          </div>
+          <ArtifactPreview v-if="artifactPreview" :preview="artifactPreview" @close="clearArtifactPreview" />
         </template>
       </aside>
     </main>

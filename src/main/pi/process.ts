@@ -18,6 +18,8 @@ export interface AgentSpawnOptions {
   extensionPath?: string;
   tools?: string;
   noBuiltinTools?: boolean;
+  evidenceOnly?: boolean;
+  systemPrompt?: string;
   env?: Record<string, string | undefined>;
   resume?: boolean;
   ephemeral?: boolean;
@@ -155,12 +157,14 @@ export class AgentProcessManager extends EventEmitter {
       options.name,
     ];
 
+    if (options.systemPrompt) args.push('--system-prompt', options.systemPrompt);
     if (options.provider) args.push('--provider', options.provider);
     if (options.model) args.push('--model', options.model);
     if (options.thinking && options.thinking !== 'default') args.push('--thinking', options.thinking);
     if (options.extensionPath && existsSync(options.extensionPath)) {
       args.push('--extension', options.extensionPath);
     }
+    if (options.evidenceOnly) args.push('--no-tools', '--no-extensions');
     if (options.noBuiltinTools) args.push('--no-builtin-tools');
     if (options.tools) args.push('--tools', options.tools);
     if (options.ephemeral) args.push('--no-session');

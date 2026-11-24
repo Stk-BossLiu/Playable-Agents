@@ -2910,3 +2910,16 @@
 
 .context-usage { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; color: var(--fg-dim); font-size: 11px; font-variant-numeric: tabular-nums; }
 .context-usage progress { width: 52px; height: 5px; accent-color: var(--accent); }
+
+.playable-subgraph { grid-column: 2 / -1; }
+.playable-subgraph .board-toolbar { justify-content: flex-start; }
+.playable-subgraph-body { display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-start; overflow: auto; padding: 16px; }
+.stage-flow { list-style: none; margin: 0; padding: 0; flex: 1 1 160px; }
+.stage-flow li + li::before { content: '↓'; display: block; text-align: center; color: var(--fg-faint); }
+.stage-flow button { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px; width: 100%; padding: 9px 12px; cursor: pointer; color: inherit; background: var(--ink-800); border: 1px solid var(--line); border-radius: 5px; }
+.stage-flow button[aria-pressed="true"] { border-color: var(--accent); }
+.stage-flow small, .stage-detail dt { color: var(--fg-faint); }
+.stage-detail { flex: 2 1 220px; min-width: 0; overflow-wrap: anywhere; padding: 12px; background: var(--ink-850); border: 1px solid var(--line); border-radius: 5px; }
+.stage-detail h3 { margin: 0; }
+.stage-detail dd { margin: 4px 0 12px; }
+.reverse-prompt { white-space: pre-line; }

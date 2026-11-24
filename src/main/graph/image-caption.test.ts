@@ -6,7 +6,7 @@ const caption = mediaNodes.find(node => node.type === 'media.image-caption')!;
 const inputPath = 'package.json'; // The mock checks attachment routing, not pixel decoding.
 function context(count: number, agent: NodeRunContext['agent']): NodeRunContext {
   return {
-    runId: 'caption', graph: { schemaVersion: 1, id: 'g', name: 'g', version: '1', builtin: false, nodes: [], edges: [], groups: [] },
+    projectRoot: process.cwd(), runId: 'caption', graph: { schemaVersion: 1, id: 'g', name: 'g', version: '1', builtin: false, nodes: [], edges: [], groups: [] },
     node: { id: 'images', title: '图片', type: caption.type, position: { x: 0, y: 0 }, params: {} },
     params: {}, inputs: { images: Array<string>(count).fill(inputPath) }, signal: new AbortController().signal,
     log: vi.fn(), stream: vi.fn(), writeArtifact: vi.fn(), tool: vi.fn(), human: vi.fn(), agent,

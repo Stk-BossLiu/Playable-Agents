@@ -1,7 +1,7 @@
 import { promises as fsp } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { readJson, writeJsonAtomic } from '../utils/fs';
+import { writeJsonAtomic } from '../utils/fs';
 
 interface McpConfigFile {
   mcpServers?: Record<string, unknown>;
@@ -21,6 +21,27 @@ const DESCRIPTION =
  * 合并写入 ~/.pi/agent/mcp.json。只增/改 mcpServers.<serverName>，保留用户其它 MCP 配置。
  * 首次写入前备份；卸载时移除我们的条目，文件因此变空则恢复备份或删除。
  */
+let pendingWrite = Promise.resolve();
+function serializeConfig<T>(operation: () => Promise<T>): Promise<T> {
+  const result = pendingWrite.then(operation);
+  pendingWrite = result.then(() => undefined, () => undefined);
+  return result;
+}
+
+export async function readMcpConfig(path: string): Promise<McpConfigFile> {
+  let text: string;
+  try { text = await fsp.readFile(path, 'utf8'); }
+  catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return {};
+    throw error;
+  }
+  const config: unknown = JSON.parse(text);
+  if (!isRecord(config) || (config.mcpServers !== undefined && !isRecord(config.mcpServers))) {
+    throw new Error(`MCP 配置格式无效：${path}`);
+  }
+  return config;
+}
+
 export class McpConfigWriter {
   readonly configPath: string;
   readonly backupPath: string;
@@ -34,22 +55,36 @@ export class McpConfigWriter {
     this.backupPath = `${this.configPath}.cocos-ai-agent.bak`;
   }
 
-  async write(url: string): Promise<string> {
+  write(url: string): Promise<string> {
+    const server: McpServerConfig = { url, timeout: 600, description: DESCRIPTION };
+    return serializeConfig(() => this.merge(server, false));
+  }
+
+  addStdio(server: { command: string; args: string[] }): Promise<string> {
+    return serializeConfig(() => this.merge(server, true));
+  }
+
+  private async merge(server: McpServerConfig | { command: string; args: string[] }, onlyIfMissing: boolean): Promise<string> {
     await fsp.mkdir(dirname(this.configPath), { recursive: true });
     await this.ensureBackup();
 
-    const existing = (await readJson<McpConfigFile>(this.configPath)) ?? {};
+    const existing = await readMcpConfig(this.configPath);
     const mcpServers = isRecord(existing.mcpServers) ? { ...existing.mcpServers } : {};
-    const server: McpServerConfig = { url, timeout: 600, description: DESCRIPTION };
+    if (onlyIfMissing && Object.hasOwn(mcpServers, this.serverName)) {
+      throw new Error(`已有 mcpServers.${this.serverName} 配置，请检查 ${this.configPath}`);
+    }
     mcpServers[this.serverName] = server;
 
     await writeJsonAtomic(this.configPath, { ...existing, mcpServers });
     return this.configPath;
   }
 
-  async remove(): Promise<void> {
-    const existing = await readJson<McpConfigFile>(this.configPath);
-    if (!existing) return;
+  remove(): Promise<void> {
+    return serializeConfig(() => this.removeEntry());
+  }
+
+  private async removeEntry(): Promise<void> {
+    const existing = await readMcpConfig(this.configPath);
     const mcpServers = isRecord(existing.mcpServers) ? { ...existing.mcpServers } : {};
     if (!(this.serverName in mcpServers)) return;
     delete mcpServers[this.serverName];

@@ -1,3 +1,5 @@
+import { PLAYABLE_AGENT_TYPE } from './playable';
+
 export type ModelApiType =
   | 'openai-completions'
   | 'openai-responses'
@@ -62,6 +64,7 @@ export type AgentModelKind =
   | 'agent.role.designer'
   | 'agent.role.developer'
   | 'agent.role.validator'
+  | typeof PLAYABLE_AGENT_TYPE
   | 'agent.vision';
 
 export const AGENT_MODEL_KINDS: AgentModelKind[] = [
@@ -72,6 +75,7 @@ export const AGENT_MODEL_KINDS: AgentModelKind[] = [
   'agent.role.designer',
   'agent.role.developer',
   'agent.role.validator',
+  PLAYABLE_AGENT_TYPE,
   'agent.vision',
 ];
 

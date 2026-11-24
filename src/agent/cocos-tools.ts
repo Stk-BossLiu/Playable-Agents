@@ -1,3 +1,5 @@
+import { existsSync, realpathSync } from 'node:fs';
+import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { needsCompaction, type ContextUsage } from '../shared/context-usage';
 
 interface CompactContext {
@@ -79,6 +81,8 @@ export default function cocosToolsExtension(pi: PiExtensionApi): void {
 
 ## Cocos AI Agent editor tooling
 
+- Save every generated document (plans, reports, design notes, tables and exports) under the active Creator project root docs/ directory. This applies to every tool, including bash.
+
 - All Cocos Creator editor operations MUST go through the MCP server named \`cocos\` provided by the Cocos AI Agent extension.
 - Its tools live under the \`mcp__cocos\` namespace: \`mcp__cocos__node_create\`, \`mcp__cocos__component_add\`, \`mcp__cocos__property_set\`, \`mcp__cocos__asset_query_assets\`, etc.
 - MCP tools use \`codemode\`. In a codemode script call them as \`tools.mcp__cocos__node_create({...})\`; discover them with \`searchTools("cocos node")\`, \`describeNamespace("mcp__cocos")\`, or \`ALL_TOOLS\`.
@@ -95,6 +99,17 @@ export default function cocosToolsExtension(pi: PiExtensionApi): void {
   pi.on('tool_call', (event: { toolName?: string; input?: Record<string, unknown> }) => {
     const toolName = String(event?.toolName ?? '');
     const input = event?.input ?? {};
+    if (toolName === 'write' && typeof input.path === 'string' && /\.(?:md|markdown|mdx|txt|rst|adoc|pdf|docx?|odt|rtf|xlsx?|csv|pptx?)$/i.test(input.path)) {
+      const project = realpathSync(process.cwd());
+      const docs = join(project, 'docs');
+      const target = resolve(project, input.path);
+      let existing = target;
+      while (!existsSync(existing) && dirname(existing) !== existing) existing = dirname(existing);
+      const canonical = resolve(realpathSync(existing), relative(existing, target));
+      if ([target, canonical].some(path => { const rel = relative(docs, path); return !rel || rel.startsWith('..') || isAbsolute(rel); })) {
+        return { block: true, reason: '请将生成的文档写入当前 Cocos 项目根目录 docs/ 下。' };
+      }
+    }
     const text = [input.command, input.path, input.content]
       .filter((value): value is string => typeof value === 'string')
       .join('\n');

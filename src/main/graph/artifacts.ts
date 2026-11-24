@@ -1,8 +1,8 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { promises as fsp } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
 import type { ArtifactRef } from '../../shared/graph';
-import { assertInside } from '../utils/fs';
+import { assertInside, ensureProjectDirectory } from '../utils/fs';
 import type { WriteArtifactInput } from './nodes/types';
 
 /**
@@ -28,16 +28,20 @@ export class ArtifactStore {
   }
 
   async write(runId: string, nodeId: string, input: WriteArtifactInput): Promise<ArtifactRef> {
-    const nodeDir = this.nodeDir(runId, nodeId);
+    const nodeDir = ['markdown', 'text', 'json'].includes(input.type)
+      ? join(this.projectRoot, 'docs', 'cocos-ai-agent', safeSegment(this.graphId), safeSegment(runId), safeSegment(nodeId))
+      : this.nodeDir(runId, nodeId);
     const target = resolve(nodeDir, input.path);
     const rel = relative(resolve(nodeDir), target);
     if (!rel || rel.startsWith('..') || resolve(nodeDir, rel) !== target) {
       throw new Error(`Artifact path escapes node directory: ${input.path}`);
     }
     assertInside(this.projectRoot, target);
-    await fsp.mkdir(dirname(target), { recursive: true });
+    await ensureProjectDirectory(this.projectRoot, dirname(target));
     const data = typeof input.content === 'string' ? Buffer.from(input.content, 'utf8') : Buffer.from(input.content);
-    await fsp.writeFile(target, data);
+    const tmp = `${target}.${randomUUID()}.tmp`;
+    try { await fsp.writeFile(tmp, data, { flag: 'wx' }); await fsp.rename(tmp, target); }
+    finally { await fsp.rm(tmp, { force: true }); }
     const hash = createHash('sha256').update(data).digest('hex');
     return {
       id: `${runId}:${nodeId}:${rel.replace(/\\/g, '/')}`,

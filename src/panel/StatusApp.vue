@@ -11,6 +11,7 @@ import type {
 import type { AgentStatus } from '../shared/types';
 import { groupModelProviders, hostnameOf, providerKey, type ProviderGroup } from './model-providers';
 import { request, requestRetry } from './api';
+import { MessageName } from '../shared/protocol';
 import { t } from './i18n';
 import { setToast } from './store';
 import ViewTabs from './components/ViewTabs.vue';
@@ -33,11 +34,28 @@ const AGENT_MODEL_ITEMS = [
   { type: 'agent.role.designer', label: 'agentModel.roleDesigner' },
   { type: 'agent.role.developer', label: 'agentModel.roleDeveloper' },
   { type: 'agent.role.validator', label: 'agentModel.roleValidator' },
+  { type: 'agent.playable-reverse', label: 'agentModel.playableReverse' },
   { type: 'agent.vision', label: 'agentModel.vision' },
 ] as const;
 
 type ModalMode = 'provider' | 'model' | null;
 
+const installingRea = ref(false);
+const reaFeedback = ref('');
+async function installRea(): Promise<void> {
+  if (installingRea.value) return;
+  installingRea.value = true;
+  reaFeedback.value = '';
+  try {
+    await request<string>(MessageName.ReaInstall);
+    reaFeedback.value = t('status.reaInstalled');
+    await refresh();
+  } catch (caught) {
+    reaFeedback.value = errorText(caught);
+  } finally {
+    installingRea.value = false;
+  }
+}
 const dependencies = ref<DependenciesDTO | null>(null);
 const models = ref<ModelProfilesDTO | null>(null);
 const agent = ref<AgentStatus>({ running: false });
@@ -562,6 +580,12 @@ function errorText(caught: unknown): string {
               </div>
               <div v-if="item.path" class="dependency-path">{{ item.path }}</div>
               <div v-if="item.message" class="dependency-message">{{ item.message }}</div>
+              <template v-if="item.id === 'rea'">
+                <button v-if="item.state === 'missing'" type="button" class="btn" :disabled="installingRea" @click="installRea">
+                  {{ t(installingRea ? 'status.reaInstalling' : 'status.installRea') }}
+                </button>
+                <p v-if="reaFeedback" role="status" class="dependency-message">{{ reaFeedback }}</p>
+              </template>
               <div v-if="item.action" class="dependency-action">{{ t('status.suggestion', { action: item.action }) }}</div>
             </div>
             <span class="dependency-state" :class="statusClass(item.state)">{{ stateLabel(item.state) }}</span>

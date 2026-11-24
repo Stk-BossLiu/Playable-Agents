@@ -1,4 +1,5 @@
 import { NodeRegistry } from './registry';
+import { playableAgentNode } from '../playable/analyst';
 import { agentNodes } from './agent';
 import { humanNodes } from './human';
 import { logicNodes } from './logic';
@@ -12,6 +13,7 @@ export function createNodeRegistry(): NodeRegistry {
     .registerAll(logicNodes)
     .registerAll(outputNodes)
     .registerAll(agentNodes)
+    .register(playableAgentNode)
     .registerAll(humanNodes)
     .registerAll(mediaNodes);
 }

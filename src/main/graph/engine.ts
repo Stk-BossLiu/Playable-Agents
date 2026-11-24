@@ -105,6 +105,7 @@ interface PendingHuman {
   nodeId: string;
   active: ActiveRun;
   timer: ReturnType<typeof setTimeout> | null;
+  signal: AbortSignal;
   onAbort: () => void;
   resolve: (result: HumanRunResult) => void;
   reject: (error: Error) => void;
@@ -311,7 +312,8 @@ export class GraphEngine {
     state.attempt = 0;
     this.emitNodeState(node.id, state);
 
-    const cacheMode = nodeCacheMode(node, active.options);
+    // A path is not an HTML content hash. Each run also owns its manual frames.
+    const cacheMode = node.type === 'analysis.rea-reverse' ? 'off' : nodeCacheMode(node, active.options);
     const cacheKey = cacheMode === 'off' ? '' : this.cacheKey(active.graph.id, node, inputs);
     if (cacheMode !== 'off' && cacheMode !== 'force' && cacheKey) {
       const cached = this.cache.get(cacheKey);
@@ -410,7 +412,7 @@ export class GraphEngine {
     inputs: Record<string, unknown>,
   ): Promise<NodeResult> {
     const controller = new AbortController();
-    const timeoutMs = Math.max(0, nodeNumber(node.meta?.timeoutMs, active.options.timeoutMs ?? 0));
+    const timeoutMs = ['analysis.rea-reverse', 'agent.playable-reverse'].includes(node.type) ? 0 : Math.max(0, nodeNumber(node.meta?.timeoutMs, active.options.timeoutMs ?? 0));
     let timedOut = false;
     const onRunAbort = (): void => controller.abort();
     active.control.signal.addEventListener('abort', onRunAbort, { once: true });
@@ -422,6 +424,7 @@ export class GraphEngine {
       : null;
 
     const ctx: NodeRunContext = {
+      projectRoot: this.options.projectRoot,
       runId: active.runId,
       graph: active.graph,
       node,
@@ -449,7 +452,7 @@ export class GraphEngine {
           },
         );
       },
-      human: (request) => this.requestHuman(active, node, request),
+      human: (request) => this.requestHuman(active, node, request, controller.signal),
     };
 
     try {
@@ -472,7 +475,8 @@ export class GraphEngine {
     }
   }
 
-  private requestHuman(active: ActiveRun, node: GraphNode, request: HumanRunRequest): Promise<HumanRunResult> {
+  private requestHuman(active: ActiveRun, node: GraphNode, request: HumanRunRequest, signal: AbortSignal): Promise<HumanRunResult> {
+    signal.throwIfAborted();
     const id = `human-${Date.now().toString(36)}-${randomBytes(3).toString('hex')}`;
     return new Promise<HumanRunResult>((resolve, reject) => {
       const state = active.states.get(node.id);
@@ -503,12 +507,13 @@ export class GraphEngine {
         nodeId: node.id,
         active,
         timer,
+        signal,
         onAbort,
         resolve,
         reject,
       };
       this.humans.set(id, pending);
-      active.control.signal.addEventListener('abort', onAbort, { once: true });
+      signal.addEventListener('abort', onAbort, { once: true });
       this.emit({
         type: 'human-request',
         payload: {
@@ -538,7 +543,7 @@ export class GraphEngine {
 
   private removePendingListeners(pending: PendingHuman): void {
     if (pending.timer) clearTimeout(pending.timer);
-    pending.active.control.signal.removeEventListener('abort', pending.onAbort);
+    pending.signal.removeEventListener('abort', pending.onAbort);
   }
 
   private cacheKey(graphId: string, node: GraphNode, inputs: Record<string, unknown>): string {

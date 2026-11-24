@@ -2,6 +2,7 @@ import { setImmediate } from 'node:timers/promises';
 import { afterEach, expect, it, vi } from 'vitest';
 import { AgentProcessManager } from '../pi/process';
 import { ToolRegistry } from '../bridge/schema';
+import { PLAYABLE_AGENT_TYPE, PLAYABLE_SYSTEM_PROMPT } from '../../shared/playable';
 import { AgentRuntime } from './agent';
 
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
@@ -10,6 +11,7 @@ function fixture() {
   vi.stubGlobal('Editor', { Project: { path: '.' }, Message: { send: vi.fn() } });
   const runtime = new AgentRuntime(new ToolRegistry());
   const rpc = {
+    setModel: vi.fn().mockResolvedValue(undefined),
     prompt: vi.fn().mockResolvedValue({ disposition: 'started' }),
     getState: vi.fn().mockResolvedValue({}),
   };
@@ -21,7 +23,7 @@ function fixture() {
   const start = (prompt: string) => runtime.runNodeAgent({ prompt }, new AbortController().signal, vi.fn());
   const event = (type: string, fields = {}) => worker.emit('rpc-event', { type, ...fields });
   const end = (text: string) => event('message_end', { message: { role: 'assistant', content: [{ type: 'text', text }] } });
-  return { start, event, end, rpc, stop };
+  return { start, event, end, rpc, stop, runtime };
 }
 
 it('holds the node queue through tool turns and retries until Pi settles', async () => {
@@ -54,4 +56,23 @@ it('surfaces the last model failure even after earlier assistant text', async ()
   event('message_end', { message: { role: 'assistant', stopReason: 'error', content: [], errorMessage: 'maximum context length exceeded' } });
   event('agent_settled');
   await expect(result).rejects.toThrow('maximum context length exceeded');
+});
+
+
+it('routes reverse sessions through the dedicated default and honors a paired node override', async () => {
+  const { runtime, rpc, event, end } = fixture();
+  vi.spyOn(runtime.models, 'getAgentProfileId').mockImplementation(kind => kind === PLAYABLE_AGENT_TYPE ? 'reverse' : null);
+  vi.spyOn(runtime.models, 'resolveProfile').mockReturnValue({ provider: 'pi-reverse', modelId: 'reverse-default' });
+  for (const [agentType, override] of [['analysis.rea-reverse', false], [PLAYABLE_AGENT_TYPE, true]] as const) {
+    const run = runtime.runNodeAgent({ agentType, systemPrompt: PLAYABLE_SYSTEM_PROMPT, prompt: 'evidence',
+      ...(override ? { provider: 'pi-override', model: 'node-model' } : {}) }, new AbortController().signal, vi.fn());
+    await setImmediate();
+    expect(rpc.setModel).toHaveBeenLastCalledWith(...(override ? ['pi-override', 'node-model'] : ['pi-reverse', 'reverse-default']));
+    expect(rpc.prompt.mock.calls.at(-1)?.[0]).toBe('evidence');
+    end('[]'); event('agent_settled'); await run;
+  }
+  const args = new AgentProcessManager()['buildArgs']({ piPath: 'pi', cwd: '.', name: 'reverse', sessionDir: '.',
+    systemPrompt: PLAYABLE_SYSTEM_PROMPT, ephemeral: true, evidenceOnly: true });
+  expect(args[args.indexOf('--system-prompt') + 1]).toBe(PLAYABLE_SYSTEM_PROMPT);
+  expect(args).toEqual(expect.arrayContaining(['--no-tools', '--no-extensions', '--no-session']));
 });

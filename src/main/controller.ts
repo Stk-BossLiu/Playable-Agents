@@ -13,6 +13,7 @@ import { ApprovalManager } from './bridge/approval';
 import { ToolExecutor } from './bridge/executor';
 import { EditorStateGate } from './bridge/state-gate';
 import { AgentRuntime } from './services/agent';
+import { installRea } from './services/rea-install';
 import { DependencyService } from './services/dependencies';
 import { writeDiagnostic } from './services/diagnostics';
 import { sendPanelEvent, startEditorEventBridge, stopEditorEventBridge } from './services/events';
@@ -95,6 +96,7 @@ export class MainController {
       visionProfileId?: string | null;
       agentProfiles?: Record<string, string | null>;
     }) => this.runtime.models.setDefaults(payload ?? {}),
+    reaInstall: () => installRea(),
     dependenciesGet: () => this.dependencies.check(),
     piDownload: () => this.runtime.downloadPi(),
     piSelectPath: () => this.runtime.selectPiPath(),

@@ -1,10 +1,8 @@
 import { execFile } from 'node:child_process';
-import { homedir } from 'node:os';
-import { join } from 'node:path';
 import type { DependencyItem, DependenciesDTO } from '../../shared/dependencies';
 import type { ModelProfileView } from '../../shared/models';
 import { requestWithTimeout } from '../utils/ipc-editor';
-import { readJson } from '../utils/fs';
+import { checkRea } from './rea-install';
 import type { AgentRuntime } from './agent';
 
 /**
@@ -168,21 +166,6 @@ async function checkFfmpeg(): Promise<DependencyItem> {
       action: '安装 ffmpeg 或设置 FFMPEG_PATH',
     };
   }
-}
-
-async function checkRea(): Promise<DependencyItem> {
-  const agentDir = process.env.PI_CODING_AGENT_DIR?.trim() || join(homedir(), '.pi', 'agent');
-  const config = await readJson<{ mcpServers?: Record<string, unknown> }>(join(agentDir, 'mcp.json'));
-  const configured = Boolean(config?.mcpServers && 'rea' in config.mcpServers);
-  return {
-    id: 'rea',
-    label: 'REA 逆向（可选）',
-    required: false,
-    state: configured ? 'ready' : 'optional',
-    ...(configured
-      ? { message: '检测到 rea MCP 配置。' }
-      : { message: '未配置 REA；参考试玩逆向节点会跳过。', action: '如需要，在 MCP 设置中添加 REA' }),
-  };
 }
 
 async function checkEditor(): Promise<DependencyItem> {

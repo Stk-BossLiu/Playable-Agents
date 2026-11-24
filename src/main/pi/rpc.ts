@@ -72,7 +72,7 @@ interface PendingRequest {
   command: string;
   resolve: (value: unknown) => void;
   reject: (error: Error) => void;
-  timer: NodeJS.Timeout;
+  timer?: NodeJS.Timeout;
 }
 
 /**
@@ -110,10 +110,10 @@ export class PiRpcClient extends EventEmitter {
     const payload = { id, ...command };
 
     return new Promise<T>((resolve, reject) => {
-      const timer = setTimeout(() => {
+      const timer = timeoutMs ? setTimeout(() => {
         if (!this.pending.delete(id)) return;
         reject(new RpcTimeoutError(commandName, timeoutMs));
-      }, timeoutMs);
+      }, timeoutMs) : undefined;
 
       this.pending.set(id, {
         command: commandName,
@@ -142,7 +142,7 @@ export class PiRpcClient extends EventEmitter {
 
   prompt(
     message: string,
-    options: { images?: RpcImage[]; streamingBehavior?: 'steer' | 'followUp' } = {},
+    options: { images?: RpcImage[]; streamingBehavior?: 'steer' | 'followUp'; timeoutMs?: number } = {},
   ): Promise<{ disposition: 'started' | 'queued' | 'handled' }> {
     return this.request<{ disposition: 'started' | 'queued' | 'handled' }>(
       {
@@ -151,7 +151,7 @@ export class PiRpcClient extends EventEmitter {
         ...(options.images?.length ? { images: options.images } : {}),
         ...(options.streamingBehavior ? { streamingBehavior: options.streamingBehavior } : {}),
       },
-      120_000,
+      options.timeoutMs ?? 120_000,
     );
   }
 

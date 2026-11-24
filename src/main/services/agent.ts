@@ -11,6 +11,7 @@ import type {
   ThinkingLevel,
 } from '../../shared/types';
 import type { AgentModelKind } from '../../shared/models';
+import { PLAYABLE_AGENT_TYPE, PLAYABLE_SYSTEM_PROMPT } from '../../shared/playable';
 import { BridgeServer } from '../bridge/server';
 import type { ToolContext, ToolRegistry } from '../bridge/schema';
 import type { ToolResult } from '../bridge/result';
@@ -91,7 +92,7 @@ export class AgentRuntime {
     return this.startProcess(this.agentProcess);
   }
 
-  private async startProcess(manager: AgentProcessManager): Promise<Failure | Success<{ alreadyRunning?: boolean }>> {
+  private async startProcess(manager: AgentProcessManager, evidenceOnly = false): Promise<Failure | Success<{ alreadyRunning?: boolean }>> {
     const workflow = manager === this.nodeProcess;
     if (manager.running) {
       return { ok: true, alreadyRunning: true };
@@ -144,12 +145,14 @@ export class AgentRuntime {
         piPath: binary.path,
         cwd: Editor.Project.path,
         sessionDir,
-        name: `cocos-${projectName}`,
+        name: evidenceOnly ? `playable-reverse-${projectName}` : `cocos-${projectName}`,
+        systemPrompt: evidenceOnly ? PLAYABLE_SYSTEM_PROMPT : undefined,
         provider: profileConfig.provider || settings.provider || undefined,
         model: profileConfig.modelId || settings.model || undefined,
         thinking: settings.thinking,
-        extensionPath: existsSync(extensionPath) ? extensionPath : undefined,
-        tools: 'read,bash,edit,write,codemode',
+        extensionPath: !evidenceOnly && existsSync(extensionPath) ? extensionPath : undefined,
+        tools: evidenceOnly ? undefined : 'read,bash,edit,write,codemode',
+        evidenceOnly,
         env,
         resume: !workflow && settings.resumeLastSession,
         ephemeral: workflow,
@@ -254,7 +257,7 @@ export class AgentRuntime {
     return this.withNodeAgentLock(async () => {
       if (signal.aborted) throw new Error('Agent 运行已取消');
       try {
-        const started = await this.startProcess(this.nodeProcess);
+        const started = await this.startProcess(this.nodeProcess, this.nodeModelKind(request.agentType) === PLAYABLE_AGENT_TYPE);
         if (!started.ok) throw new Error(started.error.message);
         return await this.runNodeAgentOnce(request, signal, onStream);
       } finally {
@@ -277,6 +280,9 @@ export class AgentRuntime {
       case 'agent.role':
       case 'agent.vision':
         return agentType;
+      case 'analysis.rea-reverse':
+      case PLAYABLE_AGENT_TYPE:
+        return PLAYABLE_AGENT_TYPE;
       case 'media.image-caption':
         return 'agent.vision';
       default:
@@ -408,7 +414,8 @@ export class AgentRuntime {
       settledReject?.(new Error('Agent 运行已取消'));
     };
     signal.addEventListener('abort', onAbort, { once: true });
-    const timeout = setTimeout(() => {
+    const reverseAnalyst = this.nodeModelKind(request.agentType) === PLAYABLE_AGENT_TYPE;
+    const timeout = reverseAnalyst ? undefined : setTimeout(() => {
       void rpc.abort().catch(() => undefined);
       settledReject?.(new Error('Agent 运行超时（10 分钟）'));
     }, 10 * 60 * 1000);
@@ -416,8 +423,11 @@ export class AgentRuntime {
     try {
       if (signal.aborted) throw new Error('Agent 运行已取消');
       onStream('status', { state: 'started' });
-      const prompt = [request.systemPrompt, request.prompt].filter(Boolean).join('\n\n');
+      const prompt = reverseAnalyst
+        ? request.prompt
+        : [request.systemPrompt, request.prompt].filter(Boolean).join('\n\n');
       const result = await rpc.prompt(prompt, {
+        ...(reverseAnalyst ? { timeoutMs: 0 } : {}),
         ...(request.images?.length ? { images: request.images } : {}),
       });
       if (result.disposition !== 'handled') {

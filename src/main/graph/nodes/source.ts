@@ -1,3 +1,4 @@
+import { isLocalPlayableHtml } from '../../../shared/playable';
 import type { ArtifactRef } from '../../../shared/graph';
 import type { NodeDefinition } from './types';
 
@@ -136,13 +137,13 @@ export const sourceNodes: NodeDefinition[] = [
     type: 'input.reference-playable',
     category: 'source',
     label: '参考试玩',
-    description: '参考 playable 的链接、HTML 或包路径；可选输入。',
+    description: '选择本地 HTML 试玩文件（.html）。',
     inputs: [],
     outputs: [{ name: 'artifact', type: 'artifact', required: true }],
     paramsSchema: {
       type: 'object',
       properties: {
-        path: { type: 'string', description: '链接、HTML 或包路径' },
+        path: { type: 'string', description: '本地 .html 文件绝对路径' },
         name: { type: 'string', description: '显示名' },
       },
       required: ['path'],
@@ -150,7 +151,7 @@ export const sourceNodes: NodeDefinition[] = [
     },
     async run(ctx) {
       const path = textParam(ctx.params, 'path');
-      if (!path) throw new Error('input.reference-playable 缺少 params.path');
+      if (!isLocalPlayableHtml(path)) throw new Error('参考试玩仅支持本地 .html 文件的绝对路径');
       const ref = fileRef(path, 'file');
       if (typeof ctx.params.name === 'string' && ctx.params.name.trim()) ref.name = ctx.params.name.trim();
       return { outputs: { artifact: ref } };

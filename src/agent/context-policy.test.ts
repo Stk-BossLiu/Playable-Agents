@@ -30,6 +30,14 @@ describe('chat context policy', () => {
     expect(before({ reason: 'manual' }, ctx)).toBeUndefined();
     expect(before({ reason: 'overflow' }, ctx)).toBeUndefined();
   });
+  it('directs chat document writes to project docs', () => {
+    const { hook } = setup();
+    expect(hook('before_agent_start')({}).systemPrompt).toContain('docs/');
+    const write = (path: string) => hook('tool_call')({ toolName: 'write', input: { path } });
+    expect(write('analysis/report.md')?.block).toBe(true);
+    expect(write('docs/analysis/report.md')).toBeUndefined();
+    expect(write('assets/scripts/Game.ts')).toBeUndefined();
+  });
   it('offers slash commands only at the beginning of the draft', () => {
     expect(matchChatCommands('/')).toEqual(['/compact', '/new']);
     expect(matchChatCommands('/co')).toEqual(['/compact']);

@@ -16,7 +16,7 @@
     {
       "id": "reference",
       "type": "input.reference-playable",
-      "title": "参考试玩（可选）",
+      "title": "参考试玩 HTML（可选）",
       "position": { "x": 40, "y": 220 },
       "params": { "path": "" },
       "disabled": true
@@ -24,7 +24,7 @@
     {
       "id": "rea",
       "type": "analysis.rea-reverse",
-      "title": "REA 逆向（可选）",
+      "title": "参考试玩分析（REA 子图）",
       "position": { "x": 330, "y": 220 },
       "params": {}
     },
