@@ -1,10 +1,10 @@
 {
   "schemaVersion": 1,
   "id": "playable-plan",
-  "name": "试玩开发计划",
-  "description": "策划输出 + 文案/视频/参考试玩 + 项目分析 → 汇总 → 开发计划 → 人工审核 → dev-plan.md + dev-plan.json",
+  "name": "试玩项目分析",
+  "description": "汇总策划、文案、参考试玩和项目扫描结果，生成七章《项目分析》，经人工审核后导出 Markdown 和 JSON。",
   "builtin": true,
-  "version": "1.0.0",
+  "version": "1.1.0",
   "nodes": [
     {
       "id": "brief",
@@ -78,41 +78,42 @@
       "type": "logic.merge",
       "title": "汇总提炼",
       "position": { "x": 900, "y": 360 },
-      "params": { "mode": "text", "separator": "\\n\\n---\\n\\n" }
+      "params": { "mode": "text", "separator": "\n\n---\n\n" }
     },
     {
       "id": "plan",
       "type": "agent.role",
-      "title": "策划 → 开发计划",
+      "title": "编写项目分析",
       "position": { "x": 1200, "y": 360 },
       "params": {
         "role": "pm",
-        "prompt": "请基于以下上下文产出可直接执行的 H5/Web 试玩开发计划。\\n\\n{{input}}\\n\\n要求：包含 goal/target/coreLoop/scenes/ui/assets/tasks/risks/acceptance/estimatedHours，并在最后输出一个 ```json 代码块，内容必须是完整 dev-plan JSON。"
+        "reportSections": ["资产清单", "玩法", "试玩整体流程", "节点树结构预建", "技术点分析", "开发计划", "需要用户协助点"],
+        "prompt": "基于下方资料撰写《项目分析》。只输出 Markdown，以 # 项目分析 开头，依次使用以下七个二级标题。资料未覆盖的事实写“待确认”，明确区分实测、推断和建议。\n\n## 1. 资产清单\n逐项对照试玩需求和项目扫描，列出已确认缺少的资产、用途、规格与依赖环节。扫描不完整或资源用途不明确时标记“待核实”。\n\n## 2. 玩法\n说明玩家目标、输入操作、规则与反馈，以及成功或失败条件。\n\n## 3. 试玩整体流程\n按体验顺序写明每一步的触发条件、屏幕表现、玩家操作和进入下一步的条件，覆盖结束与 CTA。\n\n## 4. 节点树结构预建\n用缩进树展示建议的 Cocos 场景层级，标注现有可复用与拟新增节点、关键组件和职责。\n\n## 5. 技术点分析\n针对本试玩说明关键实现、依据、移动 Web 性能与包体风险，以及验证方式。\n\n## 6. 开发计划\n按依赖顺序拆解具体任务，每项给出实现对象、执行步骤、交付物和可检查的完成标准。\n\n## 7. 需要用户协助点\n逐项列出需要用户提供的素材、决定或确认，说明所需回复及阻塞的任务。无明确事项时写“暂无”。\n\n项目资料\n{{input}}"
       }
     },
     {
       "id": "review",
       "type": "human.approval",
-      "title": "人工审核开发计划",
+      "title": "人工审核项目分析",
       "position": { "x": 1500, "y": 360 },
       "params": {
-        "title": "确认开发计划",
-        "description": "请检查开发计划；批准后输出 dev-plan.md 与 dev-plan.json。"
+        "title": "确认项目分析",
+        "description": "请核对七章内容，重点确认资产缺口、开发任务和需要用户协助的事项。批准后输出 project-analysis.md 与 project-analysis.json。"
       }
     },
     {
       "id": "output_md",
       "type": "output.markdown",
-      "title": "dev-plan.md",
+      "title": "project-analysis.md",
       "position": { "x": 1800, "y": 280 },
-      "params": { "path": "dev-plan.md" }
+      "params": { "path": "project-analysis.md" }
     },
     {
       "id": "output_json",
       "type": "output.json",
-      "title": "dev-plan.json",
+      "title": "project-analysis.json",
       "position": { "x": 1800, "y": 440 },
-      "params": { "path": "dev-plan.json" }
+      "params": { "path": "project-analysis.json" }
     }
   ],
   "edges": [

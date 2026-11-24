@@ -2,9 +2,10 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
 import type { GraphDocument, GraphEdge, GraphNode, GraphSummary } from '../shared/graph';
 import type { ModelProfileView, ModelProfilesDTO } from '../shared/models';
+import { groupModelProviders } from './model-providers';
 import { request, requestRetry } from './api';
 import { locale, t } from './i18n';
-import { setToast, state } from './store';
+import { setToast, state, type GraphRunView } from './store';
 import ViewTabs from './components/ViewTabs.vue';
 import ApprovalBar from './components/ApprovalBar.vue';
 
@@ -147,11 +148,61 @@ const canvasBgStyle = computed(() => ({
 const selected = computed(() => current.value?.nodes.find((node) => node.id === selectedId.value) ?? null);
 const selectedType = computed(() => nodeTypes.value.find((type) => type.type === selected.value?.type) ?? null);
 const selectedParams = computed(() => (selected.value?.params ?? {}) as Record<string, unknown>);
+const roleProviders = computed(() => groupModelProviders(modelProfiles.value));
+const roleProfile = computed(() => {
+  const { provider, model, modelProfileId } = selectedParams.value;
+  return provider && model
+    ? modelProfiles.value.find((profile) => profile.providerId === provider && profile.modelId === model)
+    : modelProfiles.value.find((profile) => profile.id === modelProfileId);
+});
+const roleProvider = computed(() => {
+  const profile = roleProfile.value;
+  return profile && roleProviders.value.find((group) => group.profiles.includes(profile));
+});
+
+function changeRoleProfile(profile?: ModelProfileView): void {
+  if (!selected.value) return;
+  const params = { ...selectedParams.value };
+  delete params.modelProfileId;
+  if (profile) {
+    params.provider = profile.providerId;
+    params.model = profile.modelId;
+  } else {
+    delete params.provider;
+    delete params.model;
+  }
+  selected.value.params = params;
+  dirty.value = true;
+}
 const paramEntries = computed(() => {
   const properties = selectedType.value?.paramsSchema?.properties ?? {};
   return Object.entries(properties).map(([key, schema]) => ({ key, schema }));
 });
 const canEdit = computed(() => Boolean(current.value) && !builtin.value);
+const runNodes = computed(() => state.graphRun.graphId === current.value?.id ? state.graphRun.nodes : {});
+const selectedResult = computed(() => runNodes.value[selectedId.value]);
+const selectedOutputPorts = computed(() => Object.entries(selectedResult.value?.outputs ?? {}).map(([port, value]) => ({
+  port, text: formatOutput(value),
+})));
+const resultSummaries = computed(() => Object.fromEntries(Object.entries(runNodes.value).map(([id, result]) => {
+  if (result.error) return [id, result.error];
+  const entry = Object.entries(result.outputs ?? {})[0];
+  if (!entry) return [id, result.artifacts?.[0]?.name ?? ''];
+  const [port, value] = entry;
+  let preview: string;
+  if (Array.isArray(value)) preview = `[${value.length}]`;
+  else if (value && typeof value === 'object') {
+    const object = value as Record<string, unknown>;
+    preview = typeof object.name === 'string' ? object.name : `{ ${Object.keys(object).slice(0, 4).join(', ')} }`;
+  } else preview = formatOutput(value);
+  return [id, `${port} · ${preview.slice(0, 120).replace(/\s+/g, ' ')}`];
+})));
+
+function formatOutput(value: unknown): string {
+  if (value === undefined) return '—';
+  if (typeof value === 'string') return value || '""';
+  return JSON.stringify(value, null, 2);
+}
 const runStatus = computed(() => state.graphRun.status);
 const selectedInputs = computed(() => selectedType.value?.inputs ?? []);
 const filteredNodeTypes = computed(() => {
@@ -1072,7 +1123,7 @@ function nodeHeight(node: GraphNode): number {
   const previewLines = nodePreview(node).length + (nodeDropHint(node) ? 1 : 0);
   const previewHeight = previewLines ? previewLines * 15 + 9 : 0;
   const content =
-    2 + NODE_HEAD_HEIGHT + NODE_PORT_PADDING * 2 + rows * NODE_PORT_ROW + previewHeight + NODE_FOOT_HEIGHT;
+    2 + NODE_HEAD_HEIGHT + NODE_PORT_PADDING * 2 + rows * NODE_PORT_ROW + previewHeight + (runNodes.value[node.id] ? NODE_FOOT_HEIGHT : 0) + NODE_FOOT_HEIGHT;
   return Math.max(node.size?.height ?? 0, content, NODE_MIN_HEIGHT);
 }
 
@@ -1322,25 +1373,46 @@ function inputSource(nodeId: string, port: string): string {
   return source ? `${source.title} · ${edge.from.port}` : edge.from.node;
 }
 
+function runStateLabel(status: string): string {
+  const labels: Record<string, [string, string]> = {
+    idle: ['未运行', 'Idle'], queued: ['排队中', 'Queued'], running: ['运行中', 'Running'],
+    success: ['成功', 'Success'], error: ['失败', 'Failed'], skipped: ['已跳过', 'Skipped'],
+    'waiting-user': ['等待确认', 'Waiting'], cancelled: ['已取消', 'Cancelled'],
+  };
+  return labels[status]?.[locale === 'zh' ? 0 : 1] ?? status;
+}
+
 function nodeStateClass(node: GraphNode): string {
-  const nodeState = state.graphRun.nodes[node.id]?.state;
+  const nodeState = runNodes.value[node.id]?.state;
   return nodeState ? `node-${nodeState}` : '';
 }
 
 function plainGraph(): GraphDocument {
-  return JSON.parse(JSON.stringify(current.value)) as GraphDocument;
+  const graph = JSON.parse(JSON.stringify(current.value)) as GraphDocument;
+  for (const node of graph.nodes) {
+    const params = node.params;
+    if (node.type !== 'agent.role' || !params?.modelProfileId) continue;
+    if (!params.provider || !params.model) {
+      const profile = modelProfiles.value.find((item) => item.id === params.modelProfileId);
+      if (!profile) continue;
+      params.provider = profile.providerId;
+      params.model = profile.modelId;
+    }
+    delete params.modelProfileId;
+  }
+  return graph;
 }
 
 async function runGraph(): Promise<void> {
   if (!current.value || runStatus.value === 'running') return;
   error.value = '';
   try {
-    const result = await request<{ status: string; nodes?: Record<string, { state: string; error?: string; cached?: boolean }> }>(
+    const result = await request<Pick<GraphRunView, 'status' | 'nodes' | 'runId'> & { graphId: string }>(
       'graph-run',
       { graph: plainGraph(), options: { concurrency: 3 } },
     );
-    state.graphRun.status = result.status as typeof state.graphRun.status;
-    if (result.nodes) state.graphRun.nodes = result.nodes;
+    if (current.value?.id !== result.graphId || (state.graphRun.runId && state.graphRun.runId !== result.runId && state.graphRun.status === 'running')) return;
+    Object.assign(state.graphRun, { graphId: result.graphId, runId: result.runId, status: result.status, nodes: result.nodes });
     setToast(
       result.status === 'success' ? 'success' : result.status === 'cancelled' ? 'warn' : 'error',
       result.status === 'success'
@@ -1356,7 +1428,8 @@ async function runGraph(): Promise<void> {
 }
 
 function nodeArtifacts(nodeId: string): Array<{ path?: string; name?: string; type?: string }> {
-  return (state.graphRun.artifacts[nodeId] ?? []) as Array<{ path?: string; name?: string; type?: string }>;
+  if (state.graphRun.graphId !== current.value?.id) return [];
+  return (runNodes.value[nodeId]?.artifacts ?? state.graphRun.artifacts[nodeId] ?? []) as Array<{ path?: string; name?: string; type?: string }>;
 }
 
 async function previewArtifact(artifact: { path?: string; name?: string }): Promise<void> {
@@ -1769,7 +1842,7 @@ function formatTime(timestamp: number): string {
               <header class="node-head" @pointerdown.stop="dragStart($event, node)">
                 <span class="node-category">{{ nodeTypeOf(node)?.category ?? 'node' }}</span>
                 <strong class="node-title">{{ node.title }}</strong>
-                <span v-if="state.graphRun.nodes[node.id]?.state" class="node-state-dot" :class="`state-${state.graphRun.nodes[node.id]?.state}`"></span>
+                <span v-if="runNodes[node.id]?.state" class="node-state-dot" :class="`state-${runNodes[node.id]?.state}`"></span>
               </header>
               <div class="node-ports">
                 <div class="port-column inputs">
@@ -1823,9 +1896,13 @@ function formatTime(timestamp: number): string {
                 </div>
                 <div v-if="nodeDropHint(node)" class="node-preview-row drop-hint">{{ nodeDropHint(node) }}</div>
               </div>
+              <div v-if="runNodes[node.id]" class="node-result-row" :title="resultSummaries[node.id]">
+                <strong>{{ runStateLabel(runNodes[node.id].state) }}</strong>
+                <span>{{ resultSummaries[node.id] }}</span>
+              </div>
               <footer class="node-foot">
                 <span>{{ node.type }}</span>
-                <span v-if="state.graphRun.nodes[node.id]?.cached">cache</span>
+                <span v-if="runNodes[node.id]?.cached">cache</span>
               </footer>
             </article>
           </div>
@@ -1909,6 +1986,15 @@ function formatTime(timestamp: number): string {
             <span>{{ t('board.disabled') }}</span>
           </label>
 
+          <section v-if="selectedResult" class="node-result-detail">
+            <h4 class="inspector-subtitle">{{ t('board.nodeResult') }} · {{ runStateLabel(selectedResult.state) }}<template v-if="selectedResult.durationMs !== undefined"> · {{ selectedResult.durationMs }} ms</template></h4>
+            <pre v-if="selectedResult.error">{{ selectedResult.error }}</pre>
+            <div v-for="output in selectedOutputPorts" :key="output.port">
+              <strong>{{ output.port }}</strong>
+              <pre>{{ output.text }}</pre>
+            </div>
+            <small v-if="selectedResult.state === 'success' && !selectedOutputPorts.length && !nodeArtifacts(selected.id).length">{{ t('board.noNodeOutput') }}</small>
+          </section>
           <h4 class="inspector-subtitle">{{ t('board.inputs') }}</h4>
           <div v-if="!selectedInputs.length" class="empty-line">—</div>
           <div v-for="port in selectedInputs" :key="port.name" class="port-info-row">
@@ -1935,7 +2021,25 @@ function formatTime(timestamp: number): string {
           >
             <span>{{ entry.key }}</span>
             <select
-              v-if="modelSelectOptions(entry.key).length"
+              v-if="selected.type === 'agent.role' && entry.key === 'provider'"
+              :value="roleProvider?.key ?? ''"
+              :disabled="!canEdit"
+              @change="changeRoleProfile(roleProviders.find(group => group.key === ($event.target as HTMLSelectElement).value)?.profiles[0])"
+            >
+              <option value="">{{ t('board.useDefault') }}</option>
+              <option v-for="group in roleProviders" :key="group.key" :value="group.key">{{ group.name }}</option>
+            </select>
+            <select
+              v-else-if="selected.type === 'agent.role' && entry.key === 'model'"
+              :value="roleProfile?.id ?? ''"
+              :disabled="!canEdit || !roleProvider"
+              @change="changeRoleProfile(roleProvider?.profiles.find(profile => profile.id === ($event.target as HTMLSelectElement).value))"
+            >
+              <option v-if="!roleProvider" value="">{{ t('board.useDefault') }}</option>
+              <option v-for="profile in roleProvider?.profiles" :key="profile.id" :value="profile.id">{{ profile.modelId }}</option>
+            </select>
+            <select
+              v-else-if="modelSelectOptions(entry.key).length"
               :value="String(selectedParams[entry.key] ?? '')"
               :disabled="!canEdit"
               @change="onModelParamChange(entry.key, ($event.target as HTMLSelectElement).value)"

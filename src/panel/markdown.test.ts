@@ -27,3 +27,14 @@ describe('renderMarkdown', () => {
     expect(html).toContain('rel="noopener noreferrer"');
   });
 });
+
+it('renders chat mentions alongside Markdown while keeping example code literal', () => {
+  const node = '@【/Canvas/确认 | uuid=123】';
+  const asset = '@【db://assets/ui/icon_<x>.png】';
+  const html = renderMarkdown(`**检查 ${node}** ${asset}\n\n\`${node}\`\n\n\`\`\`ts\n${asset}\n\`\`\``, { chat: true });
+  expect(html).toContain('<strong>检查 <span class="mention-chip mention-chip-node" title="/Canvas/确认">确认</span></strong>');
+  expect(html).toContain('class="mention-chip mention-chip-asset" title="db://assets/ui/icon_&lt;x&gt;.png">icon_&lt;x&gt;.png</span>');
+  expect(html).toContain(`<code>${node}</code>`);
+  expect(html).toContain('<code class="language-ts">@【db://assets/ui/icon_&lt;x&gt;.png】');
+  expect(renderMarkdown('![alt](https://example.org/image)', { chat: true })).not.toContain('<img');
+});

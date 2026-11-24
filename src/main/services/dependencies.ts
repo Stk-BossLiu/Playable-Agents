@@ -83,13 +83,6 @@ export class DependencyService {
     );
 
     items.push(rea);
-    items.push({
-      id: 'cocos-mcp',
-      label: 'cocos-mcp 扩展',
-      required: false,
-      state: 'not-required',
-      message: '生产不依赖；本插件自带 BridgeServer。',
-    });
 
     return { checkedAt: new Date().toISOString(), items };
   }
@@ -143,7 +136,7 @@ function modelDependency(
     state: profile.lastValidation ? 'error' : 'not-configured',
     version: profile.modelId,
     message: profile.lastValidation?.error ?? '尚未校验；Pi 可能无法使用该模型。',
-    action: '点击校验',
+    action: '在下方「模型凭证」中编辑对应模型并校验',
   };
 }
 

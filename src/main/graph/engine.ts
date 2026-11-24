@@ -292,6 +292,7 @@ export class GraphEngine {
           : '节点已禁用（旁路），已跳过。',
       );
       this.finishNode(state);
+      this.emitNodeState(node.id, state);
       this.emitNodeOutput(active, node.id, state);
       return state;
     }
@@ -300,6 +301,7 @@ export class GraphEngine {
       state.error = `缺少上游输入：${missing.join('、')}`;
       state.attempt = 1;
       this.finishNode(state);
+      this.emitNodeState(node.id, state);
       this.emitLog(node.id, 'warn', state.error);
       return state;
     }
@@ -320,6 +322,7 @@ export class GraphEngine {
         state.artifacts = cloneJson(cached.artifacts ?? []);
         this.finishNode(state);
         this.emitNodeState(node.id, state);
+        this.emitNodeOutput(active, node.id, state);
         this.emitLog(node.id, 'info', '缓存命中');
         return state;
       }
@@ -569,8 +572,7 @@ export class GraphEngine {
 
   private emitNodeOutput(active: ActiveRun, nodeId: string, state: NodeRunInfo): void {
     const artifacts = state.artifacts ?? [];
-    if (!artifacts.length) return;
-    this.emit({ type: 'node-output', payload: { nodeId, artifacts } });
+    this.emit({ type: 'node-output', payload: { runId: active.runId, nodeId, artifacts, outputs: state.outputs ?? {} } });
   }
 
   private emitLog(nodeId: string, level: string, message: string, data?: unknown): void {

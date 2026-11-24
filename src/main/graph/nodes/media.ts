@@ -1,9 +1,11 @@
 import { execFile } from 'node:child_process';
 import { promises as fsp } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { extname, join } from 'node:path';
+import { basename, extname, join } from 'node:path';
 import type { ArtifactRef } from '../../../shared/graph';
-import type { NodeDefinition } from './types';
+import type { NodeDefinition, NodeRunContext } from './types';
+
+const CAPTION_BATCH_SIZE = 4;
 
 export const mediaNodes: NodeDefinition[] = [
   {
@@ -100,26 +102,23 @@ export const mediaNodes: NodeDefinition[] = [
       const refs = Array.isArray(ctx.inputs.images) ? ctx.inputs.images : [];
       if (!refs.length) {
         ctx.log('warn', '没有图片输入，跳过图片识别（检查上游视频是否启用并成功截帧）。');
-        return { outputs: { json: { images: [] }, markdown: '（无图片）' } };
+        return { outputs: { json: { imageCount: 0, images: [] }, markdown: '（无图片）' } };
       }
-      const images = await loadImages(refs);
-      if (!images.length) {
-        return { outputs: { json: { images: [], warning: '图片不可读取' }, markdown: '（图片不可读取）' } };
+      const captions: Array<{ index: number; name: string; description: string }> = [];
+      for (let offset = 0; offset < refs.length; offset += CAPTION_BATCH_SIZE) {
+        const batch = refs.slice(offset, offset + CAPTION_BATCH_SIZE);
+        const range = `${offset + 1}–${offset + batch.length}`;
+        ctx.log('info', `正在识别第 ${range} 张图片（共 ${refs.length} 张）`);
+        try {
+          captions.push(...await captionBatch(ctx, batch, offset));
+        } catch (error) {
+          throw new Error(`图片识别失败（第 ${range} 张）：${error instanceof Error ? error.message : String(error)}`);
+        }
       }
-      const prompt =
-        typeof ctx.params.prompt === 'string' && ctx.params.prompt.trim()
-          ? ctx.params.prompt
-          : '请逐张描述这些视频参考帧的界面、核心玩法、视觉风格与可复用元素，并输出 JSON。';
-      const result = await ctx.agent({
-        prompt,
-        images,
-        ...(typeof ctx.params.visionProfileId === 'string' ? { visionProfileId: ctx.params.visionProfileId } : {}),
-      });
-      const parsed = parseJson(result.text);
       return {
         outputs: {
-          markdown: result.text,
-          json: parsed ?? { text: result.text, imageCount: images.length },
+          json: { imageCount: captions.length, images: captions },
+          markdown: captions.map(({ index, name, description }) => `### 第 ${index} 张 · ${name}\n${description}`).join('\n\n'),
         },
       };
     },
@@ -146,16 +145,12 @@ export const mediaNodes: NodeDefinition[] = [
         ctx.tool('asset_query_assets', { ccType: 'cc.SceneAsset', pattern: 'db://assets/**/*' }),
         ctx.tool('asset_query_assets', { ccType: 'cc.Prefab', pattern: 'db://assets/**/*' }),
       ]);
-      const summarize = (name: string, result: { ok: boolean; data?: unknown; error?: { message?: string } }): unknown => {
-        if (!result.ok) return { error: result.error?.message ?? `${name} failed` };
-        return result.data;
-      };
       const project = {
         scanners: {
-          scene: summarize('scene', tree as never),
-          assets: summarize('assets', assets as never),
-          scenes: summarize('scenes', scenes as never),
-          prefabs: summarize('prefabs', prefabs as never),
+          scene: tree.ok ? tree.data : { error: tree.error.message },
+          assets: summarizeAssets(assets),
+          scenes: summarizeAssets(scenes),
+          prefabs: summarizeAssets(prefabs),
         },
         constraints: ['H5/Web', 'Cocos Creator 3.8.8'],
         warnings: [],
@@ -196,6 +191,33 @@ export const mediaNodes: NodeDefinition[] = [
     },
   },
 ];
+
+/** Keep editor import metadata out of report prompts. Explicit sampling prevents false absence claims. */
+function summarizeAssets(result: Awaited<ReturnType<NodeRunContext['tool']>>) {
+  if (!result.ok) return { error: result.error.message };
+  const data = result.data;
+  if (!data || typeof data !== 'object' || !('assets' in data) || !Array.isArray(data.assets)) {
+    return { error: '未取得可用的资产清单' };
+  }
+  const counts: Record<string, number> = Object.create(null);
+  const paths: string[] = [];
+  let pathChars = 0;
+  let count = 0;
+  const maxPathChars = 16000;
+  for (const asset of data.assets) {
+    if (!asset || asset.isDirectory) continue;
+    const type = typeof asset.type === 'string' ? asset.type : 'unknown';
+    counts[type] = (counts[type] ?? 0) + 1;
+    count++;
+    const path = artifactPath(asset);
+    if (path && pathChars + path.length + 1 <= maxPathChars) {
+      paths.push(path);
+      pathChars += path.length + 1;
+    }
+  }
+  const partial = paths.length < count || ('count' in data && Number(data.count) > data.assets.length);
+  return { count, counts, paths, ...(partial ? { warning: '仅展示部分资源路径，未列出的资源需要核实。' } : {}) };
+}
 
 function artifactPath(value: unknown): string {
   if (typeof value === 'string') return value;
@@ -239,19 +261,39 @@ function runCommand(command: string, args: string[], timeout: number): Promise<s
   });
 }
 
-async function loadImages(refs: unknown[]): Promise<Array<{ type: 'image'; data: string; mimeType: string }>> {
-  const images: Array<{ type: 'image'; data: string; mimeType: string }> = [];
-  for (const item of refs) {
-    const path = artifactPath(item);
-    if (!path) continue;
-    try {
-      const data = await fsp.readFile(path);
-      images.push({ type: 'image', data: data.toString('base64'), mimeType: mimeFor(path) });
-    } catch {
-      // 跳过不可读图片
+async function captionBatch(ctx: NodeRunContext, refs: unknown[], offset: number) {
+  const paths = refs.map((ref, i) => {
+    const path = artifactPath(ref);
+    if (!path) throw new Error(`第 ${offset + i + 1} 张缺少文件路径`);
+    return path;
+  });
+  const images = await Promise.all(paths.map(async (path) => ({
+    type: 'image' as const, data: (await fsp.readFile(path)).toString('base64'), mimeType: mimeFor(path),
+  })));
+  const instructions = typeof ctx.params.prompt === 'string' && ctx.params.prompt.trim()
+    ? ctx.params.prompt.trim() : '逐张描述实际可见的界面、玩法线索、视觉风格与可复用元素。';
+  const indices = paths.map((_, i) => offset + i + 1);
+  const prompt = `${instructions}\n附件依次对应编号 ${indices.join('、')}。只返回 JSON 对象，images 数组每张一项，index 为对应的整数编号，description 为该图具体可见内容的非空中文描述。相似帧也逐张描述。`;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const result = await ctx.agent({
+      prompt: attempt ? `${prompt}\n请检查每个编号恰好出现一次，description 为字符串。` : prompt,
+      images,
+      ...(typeof ctx.params.visionProfileId === 'string' ? { visionProfileId: ctx.params.visionProfileId } : {}),
+    });
+    const parsed = parseJson(result.text);
+    const rows = parsed && typeof parsed === 'object' && 'images' in parsed ? parsed.images : undefined;
+    if (!Array.isArray(rows) || rows.length !== indices.length) continue;
+    const descriptions = new Map<number, string>();
+    for (const row of rows) {
+      if (row && indices.includes(row.index) && typeof row.description === 'string' && row.description.trim()) {
+        descriptions.set(row.index, row.description.trim());
+      }
+    }
+    if (descriptions.size === indices.length) {
+      return indices.map((index, i) => ({ index, name: basename(paths[i]), description: descriptions.get(index)! }));
     }
   }
-  return images;
+  throw new Error('视觉模型两次回复均未提供完整的逐图描述，请检查视觉模型配置');
 }
 
 function parseJson(text: string): unknown {

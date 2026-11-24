@@ -37,6 +37,7 @@ export class AgentRuntime {
   readonly models = new ModelProfileStore();
   readonly binary = new PiBinaryManager(Editor.Project.path);
   readonly agentProcess = new AgentProcessManager();
+  private readonly nodeProcess = new AgentProcessManager();
   readonly mcpConfig = new McpConfigWriter();
   readonly bridge: BridgeServer;
 
@@ -87,7 +88,12 @@ export class AgentRuntime {
   }
 
   async start(): Promise<Failure | Success<{ alreadyRunning?: boolean }>> {
-    if (this.agentProcess.running) {
+    return this.startProcess(this.agentProcess);
+  }
+
+  private async startProcess(manager: AgentProcessManager): Promise<Failure | Success<{ alreadyRunning?: boolean }>> {
+    const workflow = manager === this.nodeProcess;
+    if (manager.running) {
       return { ok: true, alreadyRunning: true };
     }
 
@@ -130,11 +136,11 @@ export class AgentRuntime {
       ...this.settings.getProviderEnv(),
       ...profileConfig.env,
       COCOS_AGENT_BRIDGE_URL: bridgeUrl,
-      COCOS_AGENT_ROLE: 'chat',
+      COCOS_AGENT_ROLE: workflow ? 'workflow' : 'chat',
     };
 
     try {
-      this.agentProcess.start({
+      manager.start({
         piPath: binary.path,
         cwd: Editor.Project.path,
         sessionDir,
@@ -145,15 +151,16 @@ export class AgentRuntime {
         extensionPath: existsSync(extensionPath) ? extensionPath : undefined,
         tools: 'read,bash,edit,write,codemode',
         env,
-        resume: settings.resumeLastSession,
+        resume: !workflow && settings.resumeLastSession,
+        ephemeral: workflow,
       });
     } catch (error) {
       return failure('PI_SPAWN_FAILED', `Pi 启动失败：${messageOf(error)}`, this.stderrHint());
     }
 
-    const rpc = this.agentProcess.client;
+    const rpc = manager.client;
     if (!rpc) {
-      await this.agentProcess.stop();
+      await manager.stop();
       return failure('PI_SPAWN_FAILED', 'Pi 进程未返回 RPC 客户端。', this.stderrHint());
     }
 
@@ -165,11 +172,12 @@ export class AgentRuntime {
         }),
       ]);
     } catch (error) {
-      const stderrTail = this.agentProcess.stderrTail;
-      await this.agentProcess.stop();
+      const stderrTail = manager.stderrTail;
+      await manager.stop();
       return failure('PI_RPC_NOT_READY', `Pi RPC 未就绪：${messageOf(error)}`, stderrTail.slice(-8).join('\n'));
     }
 
+    if (workflow) return { ok: true };
     this.startedAt = Date.now();
     this.crashCount = 0;
     this.sendStatus();
@@ -177,7 +185,7 @@ export class AgentRuntime {
   }
 
   async stop(): Promise<boolean> {
-    await this.agentProcess.stop();
+    await Promise.all([this.agentProcess.stop(), this.nodeProcess.stop()]);
     this.startedAt = 0;
     this.sendStatus();
     return true;
@@ -208,6 +216,7 @@ export class AgentRuntime {
     if (!rpc) return status;
     try {
       const state = await rpc.getState();
+      status.compacting = state.isCompacting;
       status.model = state.model?.id || state.model?.name;
       status.sessionFile = state.sessionFile;
     } catch {
@@ -233,7 +242,7 @@ export class AgentRuntime {
   }
 
   /**
-   * Agent 节点运行时：发送 prompt，等待 agent_settled，再从消息历史提取最终 assistant 文本。
+   * Agent 节点运行时：发送 prompt，等待 agent_settled，读取此次请求最终的 assistant 消息。
    * 取消时向 Pi 发 abort；不把 secret 写入日志。
    */
   async runNodeAgent(
@@ -242,12 +251,16 @@ export class AgentRuntime {
     onStream: (kind: 'text' | 'thinking' | 'tool' | 'status', payload: Record<string, unknown>) => void,
   ): Promise<AgentRunResult> {
     if (!request.prompt.trim()) throw new Error('Agent prompt 不能为空。');
-    if (!this.agentProcess.running) {
-      const started = await this.start();
-      if (!started.ok) throw new Error(started.error.message);
-    }
-    // 串行化：不同 Agent 节点可能配置不同模型，而 Pi 进程只有一个“当前模型”。
-    return this.withNodeAgentLock(() => this.runNodeAgentOnce(request, signal, onStream));
+    return this.withNodeAgentLock(async () => {
+      if (signal.aborted) throw new Error('Agent 运行已取消');
+      try {
+        const started = await this.startProcess(this.nodeProcess);
+        if (!started.ok) throw new Error(started.error.message);
+        return await this.runNodeAgentOnce(request, signal, onStream);
+      } finally {
+        await this.nodeProcess.stop();
+      }
+    });
   }
 
   private withNodeAgentLock<T>(task: () => Promise<T>): Promise<T> {
@@ -325,7 +338,7 @@ export class AgentRuntime {
   ): Promise<AgentRunResult> {
     // 等待锁期间可能已被取消。
     if (signal.aborted) throw new Error('Agent 运行已取消');
-    const rpc = this.agentProcess.client;
+    const rpc = this.nodeProcess.client;
     if (!rpc) throw new Error('Pi 客户端不可用。');
     const previous = await rpc.getState().catch(() => null);
 
@@ -348,7 +361,7 @@ export class AgentRuntime {
       }
     }
 
-    let streamedText = '';
+    let reply: Record<string, unknown> | undefined;
     let settled = false;
     let settledResolve: (() => void) | null = null;
     let settledReject: ((error: Error) => void) | null = null;
@@ -360,8 +373,11 @@ export class AgentRuntime {
       const type = String(event.type ?? '');
       const assistant = (event.assistantMessageEvent ?? event) as Record<string, unknown>;
       const delta = assistant.delta ?? assistant.textDelta ?? assistant.text;
+      if (type === 'message_end' && event.message && typeof event.message === 'object') {
+        const message = event.message as Record<string, unknown>;
+        if (message.role === 'assistant') reply = message;
+      }
       if (assistant.type === 'text_delta' && typeof delta === 'string') {
-        streamedText += delta;
         onStream('text', { text: delta });
       } else if (assistant.type === 'thinking_delta' && typeof delta === 'string') {
         onStream('thinking', { text: delta });
@@ -369,7 +385,12 @@ export class AgentRuntime {
         onStream('tool', { name: event.name ?? event.toolName ?? '', args: event.args ?? event.arguments });
       } else if (type === 'error') {
         settledReject?.(new Error(String(event.message ?? event.error ?? 'Pi 运行失败')));
-      } else if (type === 'agent_settled' || type === 'agent_end' || type === 'turn_end') {
+      // Pi 1.4 在 turn_end / agent_end 后仍可能继续工具调用、压缩或自动重试。
+      } else if (type === 'agent_settled') {
+        if (event.aborted === true) {
+          settledReject?.(new Error('Agent 运行已取消'));
+          return;
+        }
         if (!settled) {
           settled = true;
           onStream('status', { state: 'settled' });
@@ -377,7 +398,11 @@ export class AgentRuntime {
         }
       }
     };
-    this.agentProcess.on('rpc-event', onEvent);
+    // The event may arrive before the prompt acknowledgement.
+    void settledPromise.catch(() => undefined);
+    const onExit = (): void => settledReject?.(new Error('Pi 进程已退出'));
+    this.nodeProcess.once('exit', onExit);
+    this.nodeProcess.on('rpc-event', onEvent);
     const onAbort = (): void => {
       void rpc.abort().catch(() => undefined);
       settledReject?.(new Error('Agent 运行已取消'));
@@ -389,32 +414,27 @@ export class AgentRuntime {
     }, 10 * 60 * 1000);
 
     try {
+      if (signal.aborted) throw new Error('Agent 运行已取消');
       onStream('status', { state: 'started' });
-      const result = await rpc.prompt(request.prompt, {
+      const prompt = [request.systemPrompt, request.prompt].filter(Boolean).join('\n\n');
+      const result = await rpc.prompt(prompt, {
         ...(request.images?.length ? { images: request.images } : {}),
       });
       if (result.disposition !== 'handled') {
         await settledPromise;
       }
-      const messages = await rpc.getMessages().catch(() => ({ messages: [] }));
-      const finalText = extractAssistantText(messages.messages) || streamedText;
-      const state = await rpc.getState().catch(() => null);
-      return {
-        text: finalText,
-        ...(state?.model?.id || state?.model?.name ? { model: state.model.id ?? state.model.name } : {}),
-        messages: messages.messages,
-      };
+      if (!reply) throw new Error('Pi 未返回本次请求的模型回复');
+      if (reply.stopReason === 'error' || reply.stopReason === 'aborted' || reply.errorMessage) {
+        throw new Error(`模型 ${reply.model ?? target?.modelId ?? ''} 请求失败：${String(reply.errorMessage || reply.stopReason)}`);
+      }
+      const text = extractMessageText(reply.content);
+      if (!text.trim()) throw new Error('模型回复没有正文');
+      return { text, ...(typeof reply.model === 'string' ? { model: reply.model } : {}) };
     } finally {
       clearTimeout(timeout);
       signal.removeEventListener('abort', onAbort);
-      this.agentProcess.removeListener('rpc-event', onEvent);
-      // 恢复节点运行前的模型/思考级别，避免影响后续对话或其他节点。
-      if (switched && previous?.model?.provider && previous.model.id) {
-        await rpc.setModel(previous.model.provider, previous.model.id).catch(() => undefined);
-      }
-      if (request.thinking && previous?.thinkingLevel) {
-        await rpc.setThinkingLevel(previous.thinkingLevel as ThinkingLevel).catch(() => undefined);
-      }
+      this.nodeProcess.removeListener('rpc-event', onEvent);
+      this.nodeProcess.removeListener('exit', onExit);
     }
   }
 
@@ -462,8 +482,8 @@ export class AgentRuntime {
     return this.withRpc('PI_COMMANDS_FAILED', (rpc) => rpc.getCommands());
   }
 
-  async compact() {
-    return this.withRpc('PI_COMPACT_FAILED', (rpc) => rpc.compact());
+  async compact(customInstructions?: string) {
+    return this.withRpc('PI_COMPACT_FAILED', (rpc) => rpc.compact(customInstructions));
   }
 
   async getStats() {
@@ -750,33 +770,6 @@ function extractMessageText(content: unknown): string {
         return '';
       })
       .join('');
-  }
-  return '';
-}
-
-function extractAssistantText(messages: unknown[]): string {
-  for (let index = messages.length - 1; index >= 0; index -= 1) {
-    const message = messages[index];
-    if (!message || typeof message !== 'object') continue;
-    const record = message as Record<string, unknown>;
-    if (record.role !== 'assistant') continue;
-    if (typeof record.text === 'string' && record.text.trim()) return record.text;
-    const content = record.content;
-    if (typeof content === 'string') return content;
-    if (Array.isArray(content)) {
-      const text = content
-        .map((part) => {
-          if (typeof part === 'string') return part;
-          if (part && typeof part === 'object') {
-            const item = part as Record<string, unknown>;
-            if (typeof item.text === 'string') return item.text;
-            if (typeof item.content === 'string') return item.content;
-          }
-          return '';
-        })
-        .join('');
-      if (text.trim()) return text;
-    }
   }
   return '';
 }

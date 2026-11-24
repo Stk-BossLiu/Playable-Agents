@@ -5,7 +5,7 @@ export const humanNodes: NodeDefinition[] = [
     type: 'human.approval',
     category: 'human',
     label: '人工审批',
-    description: '暂停图运行，等待用户批准或打回；只有开发计划需要审批。',
+    description: '暂停图运行，等待用户批准或打回。',
     inputs: [
       { name: 'markdown', type: 'markdown', required: false },
       { name: 'json', type: 'json', required: false },
@@ -27,11 +27,11 @@ export const humanNodes: NodeDefinition[] = [
       additionalProperties: true,
     },
     async run(ctx) {
-      const title = typeof ctx.params.title === 'string' ? ctx.params.title : '确认开发计划';
+      const title = typeof ctx.params.title === 'string' ? ctx.params.title : '确认审核内容';
       const description =
         typeof ctx.params.description === 'string'
           ? ctx.params.description
-          : '请检查开发计划，批准后继续输出 dev-plan.md / dev-plan.json。';
+          : '请检查上游输出，批准后继续运行。';
       const result = await ctx.human({
         kind: 'approval',
         title,
@@ -41,7 +41,7 @@ export const humanNodes: NodeDefinition[] = [
       });
       const feedback = result.feedback ?? '';
       if (result.decision !== 'approve') {
-        throw new Error(feedback ? `用户打回计划：${feedback}` : '用户拒绝了该计划。');
+        throw new Error(feedback ? `用户打回审核内容：${feedback}` : '用户拒绝了本次输出。');
       }
       ctx.log('info', '用户已批准');
       return {

@@ -1,3 +1,4 @@
+import type { ArtifactRef } from '../shared/graph';
 import { reactive } from 'vue';
 import type {
   AgentStatus,
@@ -65,10 +66,20 @@ export interface HumanRequestView {
   payload?: unknown;
 }
 
+export interface NodeResultView {
+  state: string;
+  error?: string;
+  cached?: boolean;
+  durationMs?: number;
+  outputs?: Record<string, unknown>;
+  artifacts?: ArtifactRef[];
+}
+
 export interface GraphRunView {
+  graphId?: string;
   runId: string;
   status: 'idle' | 'running' | 'success' | 'error' | 'cancelled';
-  nodes: Record<string, { state: string; error?: string; cached?: boolean }>;
+  nodes: Record<string, NodeResultView>;
   logs: Array<{ nodeId: string; level: string; message: string; at: number }>;
   artifacts: Record<string, unknown[]>;
 }
@@ -89,6 +100,7 @@ export interface UiState {
   running: boolean;
   streaming: boolean;
   compacting: boolean;
+  contextRevision: number;
   queued: number;
   sending: boolean;
   error: string;
@@ -114,6 +126,7 @@ export const state = reactive<UiState>({
   running: false,
   streaming: false,
   compacting: false,
+  contextRevision: 0,
   queued: 0,
   sending: false,
   error: '',
@@ -169,16 +182,16 @@ export function handlePanelEvent(event: PanelEvent): void {
       break;
     }
     case 'graph-run-start': {
-      const payload = event.payload as { runId?: string };
-      state.graphRun = { runId: payload?.runId ?? '', status: 'running', nodes: {}, logs: [], artifacts: {} };
+      const payload = event.payload as { runId?: string; graphId?: string };
+      state.graphRun = { graphId: payload?.graphId, runId: payload?.runId ?? '', status: 'running', nodes: {}, logs: [], artifacts: {} };
       break;
     }
     case 'node-state': {
-      const payload = event.payload as { nodeId?: string; state?: string; error?: string; cached?: boolean };
+      const payload = event.payload as Partial<NodeResultView> & { nodeId?: string };
       if (!payload?.nodeId || !payload.state) break;
       state.graphRun.nodes = {
         ...state.graphRun.nodes,
-        [payload.nodeId]: { state: payload.state, ...(payload.error ? { error: payload.error } : {}), ...(payload.cached ? { cached: true } : {}) },
+        [payload.nodeId]: { ...state.graphRun.nodes[payload.nodeId], state: payload.state, error: payload.error, cached: payload.cached, durationMs: payload.durationMs },
       };
       break;
     }
@@ -192,8 +205,10 @@ export function handlePanelEvent(event: PanelEvent): void {
       break;
     }
     case 'node-output': {
-      const payload = event.payload as { nodeId?: string; artifacts?: unknown[] };
-      if (!payload?.nodeId) break;
+      const payload = event.payload as { runId?: string; nodeId?: string; artifacts?: ArtifactRef[]; outputs?: Record<string, unknown> };
+      if (!payload?.nodeId || (payload.runId && payload.runId !== state.graphRun.runId)) break;
+      const node = state.graphRun.nodes[payload.nodeId];
+      if (node && payload.outputs) node.outputs = payload.outputs;
       state.graphRun.artifacts = {
         ...state.graphRun.artifacts,
         [payload.nodeId]: payload.artifacts ?? [],
@@ -240,6 +255,7 @@ export function applyAgentStatus(status: AgentStatus): void {
   // state.running 表示“当前对话是否在跑”，不是 Pi 进程是否存活。
   // 进程已启动但空闲时不能显示停止按钮，也不能把下一次发送当成 steer。
   if (!status.running) {
+    state.compacting = false;
     state.running = false;
     state.streaming = false;
   }
@@ -254,7 +270,12 @@ export function handleAgentEvent(event: Record<string, any>): void {
       state.error = '';
       break;
 
+    case 'turn_end':
+      state.contextRevision++;
+      break;
+
     case 'agent_settled':
+      state.contextRevision++;
       state.running = false;
       state.streaming = false;
       state.currentAssistantId = null;
@@ -314,8 +335,7 @@ export function handleAgentEvent(event: Record<string, any>): void {
           break;
         }
         case 'error':
-          message.error = String(update.error ?? update.reason ?? '模型流式输出失败');
-          state.error = message.error;
+          message.error = errorDetail(update.error) ?? errorDetail(event.message) ?? errorDetail(update.reason) ?? STREAM_ERROR;
           message.streaming = false;
           state.streaming = false;
           break;
@@ -333,15 +353,14 @@ export function handleAgentEvent(event: Record<string, any>): void {
       const message = event.message;
       if (!message) break;
       if (message.role === 'assistant') {
-        const target = findMessageById(String(message.id ?? '')) ?? currentAssistant();
-        if (target) {
-          const text = extractContent(message.content);
-          const thinking = extractThinking(message.content);
-          if (text) target.text = text;
-          if (thinking) target.thinking = thinking;
-          target.streaming = false;
-          if (target.id === state.currentAssistantId) state.currentAssistantId = null;
-        }
+        const target = findMessageById(String(message.id ?? '')) ?? ensureAssistantMessage();
+        const text = extractContent(message.content);
+        const thinking = extractThinking(message.content);
+        if (text) target.text = text;
+        if (thinking) target.thinking = thinking;
+        target.error = errorDetail(message) ?? target.error ?? failureFallback(message.stopReason);
+        target.streaming = false;
+        if (target.id === state.currentAssistantId) state.currentAssistantId = null;
         state.streaming = false;
       } else if (message.role === 'user') {
         mergeUserMessage(message);
@@ -380,6 +399,8 @@ export function handleAgentEvent(event: Record<string, any>): void {
       state.compacting = true;
       break;
     case 'compaction_end':
+      state.contextRevision++;
+      if (event.errorMessage) setError(String(event.errorMessage));
       state.compacting = false;
       break;
 
@@ -448,6 +469,7 @@ export function hydrateMessages(rawMessages: unknown[]): void {
     }
     addMessage({
       role: message.role,
+      error: message.role === 'assistant' ? errorDetail(message) ?? failureFallback(message.stopReason) : undefined,
       text: extractContent(message.content),
       thinking: extractThinking(message.content),
       streaming: false,
@@ -495,8 +517,8 @@ function mergeUserMessage(message: Record<string, any>): void {
 function ensureAssistantMessage(): ChatMessage {
   const current = state.currentAssistantId ? findMessageById(state.currentAssistantId) : null;
   if (current && current.role === 'assistant') return current;
-  const last = currentAssistant();
-  if (last) {
+  const last = state.messages[state.messages.length - 1];
+  if (last?.role === 'assistant') {
     state.currentAssistantId = last.id;
     return last;
   }
@@ -512,16 +534,20 @@ function ensureAssistantMessage(): ChatMessage {
   return created;
 }
 
-function currentAssistant(): ChatMessage | null {
-  for (let index = state.messages.length - 1; index >= 0; index -= 1) {
-    const message = state.messages[index];
-    if (message.role === 'assistant' && message.streaming) return message;
+const STREAM_ERROR = '模型流式输出失败';
+
+function failureFallback(stopReason: unknown): string | undefined {
+  return stopReason === 'error' ? STREAM_ERROR : undefined;
+}
+
+function errorDetail(value: unknown): string | undefined {
+  if (typeof value === 'string') return value.trim() || undefined;
+  if (!value || typeof value !== 'object') return undefined;
+  const record = value as Record<string, unknown>;
+  for (const detail of [record.errorMessage, record.message]) {
+    if (typeof detail === 'string' && detail.trim()) return detail;
   }
-  for (let index = state.messages.length - 1; index >= 0; index -= 1) {
-    const message = state.messages[index];
-    if (message.role === 'assistant') return message;
-  }
-  return null;
+  return undefined;
 }
 
 function findMessageById(id: string): ChatMessage | null {

@@ -1,3 +1,4 @@
+import { queryConsole } from './console';
 import { ToolRegistry } from '../bridge/schema';
 import { assetTools } from './asset';
 import { componentTools } from './component';
@@ -14,5 +15,6 @@ export function createToolRegistry(): ToolRegistry {
   registry.registerAll(propertyTools);
   registry.registerAll(assetTools);
   registry.registerAll(editorTools);
+  registry.register(queryConsole);
   return registry;
 }

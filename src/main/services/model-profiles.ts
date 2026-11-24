@@ -321,6 +321,18 @@ export class ModelProfileStore {
       : existing[0]?.apiType ?? 'openai-completions';
     const providerName =
       (input.name ?? '').trim() || existing[0]?.providerName || hostnameOf(baseUrl);
+    // 以保存前的归属校验，避免旧面板提交合并的模型列表并覆盖其他提供商的凭证。
+    const original = existing[0];
+    if (existing.length !== existingIds.size || existing.some(profile =>
+      profile.providerName !== original.providerName || profile.baseUrl !== original.baseUrl || profile.apiType !== original.apiType,
+    )) {
+      throw new Error('模型列表已过期或包含多个提供商，请刷新后分别编辑。');
+    }
+    if (this.profiles.some(profile => !existingIds.has(profile.id) &&
+      profile.providerName === providerName && profile.baseUrl === baseUrl && profile.apiType === apiType,
+    )) {
+      throw new Error('该地址已存在同名提供商，请使用不同的名称，或编辑已有提供商。');
+    }
     const secretInput = typeof input.secret === 'string' ? input.secret.trim() : '';
     const secret = secretInput || existing.map((profile) => this.secrets[profile.id]).find(Boolean) || '';
     if (!secret) throw new Error('请先输入 API Key。');

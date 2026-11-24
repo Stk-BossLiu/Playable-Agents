@@ -659,7 +659,7 @@
   gap: var(--space-2);
 }
 
-.composer textarea {
+.composer .mention-editor {
   flex: 1 1 auto;
   min-height: 44px;
   max-height: 160px;
@@ -675,11 +675,14 @@
   outline: none;
 }
 
-.composer textarea::placeholder {
+.composer .mention-editor[data-empty="true"]::before {
+  content: attr(data-placeholder);
+  pointer-events: none;
+  position: absolute;
   color: var(--fg-faint);
 }
 
-.composer textarea:focus {
+.composer .mention-editor:focus {
   border-color: var(--line-strong);
 }
 
@@ -1746,6 +1749,27 @@
 .port-artifact { border-color: var(--fg-faint); }
 .port-any { border-color: var(--line-strong); }
 
+.node-result-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 20px;
+  padding: 0 7px;
+  border-top: 1px solid var(--line);
+  font-size: 10px;
+}
+.node-result-row strong { flex: none; }
+.node-result-row span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.node-result-detail pre {
+  max-height: 240px;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  user-select: text;
+  background: var(--ink-900);
+  padding: 6px;
+}
+
 .node-foot {
   display: flex;
   align-items: center;
@@ -1976,9 +2000,6 @@
   overflow-wrap: anywhere;
 }
 
-.dependency-action {
-  color: var(--accent);
-}
 
 .dependency-state {
   color: var(--fg-faint);
@@ -2838,3 +2859,54 @@
   line-height: 1.4;
   overflow-wrap: anywhere;
 }
+
+.mention-composer { position: relative; flex: 1 1 auto; min-width: 0; display: flex; }
+.mention-editor { min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; overflow-y: auto; }
+.mention-chip {
+  padding: 1px 6px;
+  border-radius: 5px;
+  font-weight: 600;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+  overflow-wrap: anywhere;
+}
+.mention-chip-node { background-color: #285686; color: #eff7ff; }
+.mention-chip-asset { background-color: #246344; color: #ebfff2; }
+/* Keep names visible first; paths disambiguate identical names. */
+.mention-pop, .mention-drop-error {
+  position: absolute;
+  z-index: 4;
+  bottom: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  background: var(--ink-800);
+  color: var(--fg);
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  box-shadow: var(--shadow-pop);
+}
+.mention-pop header { display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 7px 10px; border-bottom: 1px solid var(--line); }
+.mention-pop header strong { font: 600 12px var(--font-ui); }
+.mention-pop kbd { font: 10px var(--font-mono); color: var(--fg-dim); }
+.mention-menu { max-height: min(36vh, 252px); overflow: auto; padding: 3px; }
+.mention-menu button { display: flex; align-items: center; gap: 9px; padding: 5px 8px; width: 100%; background: transparent; color: var(--fg); border: 0; border-radius: 3px; text-align: left; cursor: pointer; }
+.mention-menu button:hover { background: var(--ink-700); }
+.mention-menu button.selected { background: var(--ink-700); box-shadow: inset 2px 0 var(--accent); }
+.mention-menu small { flex: none; font: 11px var(--font-ui); }
+.mention-menu .asset { color: var(--jade); }
+.mention-menu .node { color: var(--accent-strong); }
+.mention-label { display: grid; min-width: 0; line-height: 1.4; }
+.mention-label > * { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mention-label b { font-size: 12px; font-weight: 600; }
+.mention-label > span { color: var(--fg-dim); font: 10px var(--font-mono); }
+.mention-menu > div, .mention-drop-error { padding: 6px 8px; }
+.mention-drop-hint { position: absolute; inset: 0; pointer-events: none; z-index: 5; display: grid; place-items: center; background: var(--ink-800); border: 1px dashed var(--accent); border-radius: var(--radius-input); color: var(--accent-strong); }
+
+.assistant-text .reply-markdown {
+  font-size: inherit;
+  line-height: inherit;
+  overflow-x: auto;
+}
+
+.context-usage { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; color: var(--fg-dim); font-size: 11px; font-variant-numeric: tabular-nums; }
+.context-usage progress { width: 52px; height: 5px; accent-color: var(--accent); }

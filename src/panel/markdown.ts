@@ -1,4 +1,5 @@
 import MarkdownIt from 'markdown-it';
+import { mentionParts } from './mentions';
 
 /** 面板内统一的 Markdown 渲染：禁用原始 HTML，链接新窗口打开。 */
 const md = new MarkdownIt({
@@ -32,6 +33,35 @@ md.core.ruler.after('inline', 'task-list-checkbox', (state) => {
   }
 });
 
-export function renderMarkdown(text: string): string {
-  return text.trim() ? md.render(text) : '';
+// Match editor references during inline parsing so fenced and inline code stay literal.
+md.inline.ruler.before('text', 'editor_mention', (state, silent) => {
+  if (!state.env?.chat || !state.src.startsWith('@【', state.pos)) return false;
+  const end = state.src.indexOf('】', state.pos + 2);
+  if (end < 0 || end >= state.posMax) return false;
+  const raw = state.src.slice(state.pos, end + 1);
+  const [part] = mentionParts(raw);
+  if (!part || part.kind === 'text' || part.raw !== raw) return false;
+  if (!silent) {
+    const token = state.push('editor_mention', 'span', 0);
+    token.attrSet('class', `mention-chip mention-chip-${part.kind}`);
+    token.attrSet('title', part.path);
+    token.content = part.name;
+  }
+  state.pos = end + 1;
+  return true;
+});
+
+md.renderer.rules.editor_mention = (tokens, index, _options, _env, renderer) => {
+  const token = tokens[index];
+  return `<span${renderer.renderAttrs(token)}>${md.utils.escapeHtml(token.content)}</span>`;
+};
+
+// A generated reply should not initiate network or local file reads for images.
+const renderImage = md.renderer.rules.image!;
+md.renderer.rules.image = (tokens, index, options, env, renderer) => env?.chat
+  ? md.utils.escapeHtml(tokens[index].content)
+  : renderImage(tokens, index, options, env, renderer);
+
+export function renderMarkdown(text: string, context?: { chat: true }): string {
+  return text.trim() ? md.render(text, context) : '';
 }

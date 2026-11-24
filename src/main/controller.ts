@@ -119,7 +119,7 @@ export class MainController {
       this.runtime.setThinking((payload?.level ?? 'off') as ThinkingLevel),
     agentThinkingLevels: () => this.runtime.getThinkingLevels(),
     agentCommands: () => this.runtime.getCommands(),
-    agentCompact: () => this.runtime.compact(),
+    agentCompact: (payload?: { instructions?: string }) => this.runtime.compact(payload?.instructions),
     agentExport: () => this.runtime.exportHtml(),
     agentStats: () => this.runtime.getStats(),
     agentNewSession: () => this.runtime.newSession(),

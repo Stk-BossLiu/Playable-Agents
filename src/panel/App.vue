@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { AUTO_COMPACT_PERCENT, type ContextUsage } from '../shared/context-usage';
 import { t } from './i18n';
 import { request, requestRetry } from './api';
 import { MessageName } from '../shared/protocol';
@@ -23,6 +24,9 @@ import {
   state,
   type ChatMessage,
 } from './store';
+import ReplyMarkdown from './components/ReplyMarkdown.vue';
+import MentionText from './components/MentionText.vue';
+import MentionComposer from './components/MentionComposer.vue';
 import ToolCard from './components/ToolCard.vue';
 import SettingsDrawer from './components/SettingsDrawer.vue';
 import ViewTabs from './components/ViewTabs.vue';
@@ -43,7 +47,24 @@ const switchingModel = ref(false);
 const sessions = ref<AgentSessionSummary[]>([]);
 const sessionsError = ref('');
 
-const canSend = computed(() => input.value.trim().length > 0 && !state.sending);
+const usage = ref<ContextUsage | null>(null);
+let usageRequest = 0;
+async function refreshUsage(): Promise<void> {
+  const id = ++usageRequest;
+  if (!state.agent.running) { usage.value = null; return; }
+  try {
+    const result = await request<{ ok: boolean; data?: { contextUsage?: ContextUsage } }>(MessageName.AgentStats);
+    if (id === usageRequest) usage.value = result?.data?.contextUsage ?? null;
+  } catch { if (id === usageRequest) usage.value = null; }
+}
+watch(() => [state.agent.running, state.agent.sessionFile, state.agent.model], () => {
+  usage.value = null;
+  void refreshUsage();
+});
+watch(() => state.contextRevision, refreshUsage);
+onBeforeUnmount(() => { usageRequest++; });
+
+const canSend = computed(() => input.value.trim().length > 0 && !state.sending && !state.compacting);
 const streamingMessage = computed(
   () =>
     [...state.messages].reverse().find((message) => message.role === 'assistant' && message.streaming) ??
@@ -161,7 +182,7 @@ async function loadInitial(): Promise<void> {
   await Promise.all([loadSettings(), loadStatus(), loadSessions(), loadModelProfiles()]);
   syncSelectedModel();
   await loadThinkingLevels();
-  if (state.agent.running) await loadMessages();
+  if (state.agent.running) await Promise.all([loadMessages(), refreshUsage()]);
 }
 
 async function loadModelProfiles(): Promise<void> {
@@ -267,6 +288,7 @@ async function loadStatus(): Promise<void> {
   try {
     const status = await request<AgentStatus>(MessageName.AgentStatus);
     Object.assign(state.agent, status);
+    state.compacting = Boolean(status.compacting);
     if (!status.running) {
       state.running = false;
       state.streaming = false;
@@ -392,7 +414,26 @@ function formatSessionTime(iso: string): string {
 
 async function send(): Promise<void> {
   const text = input.value.trim();
-  if (!text || state.sending) return;
+  if (!text || state.sending || state.compacting) return;
+  const [command] = text.split(/\s+/, 1);
+  if (command === '/compact' || text === '/new') {
+    if (state.running) { setError(t('commands.busy')); return; }
+    state.sending = true;
+    clearError();
+    try {
+      if (command === '/new') { await newSession(); }
+      else {
+        const response = await request<{ ok: boolean; error?: { message: string } }>(MessageName.AgentCompact,
+          { instructions: text.slice(command.length).trim() || undefined });
+        if (!response?.ok) { setError(errorText(response?.error)); return; }
+        setToast('success', t('commands.compacted'));
+        await refreshUsage();
+      }
+      if (!state.error && input.value.trim() === text) input.value = '';
+    } catch (error) { setError(errorText(error)); }
+    finally { state.sending = false; }
+    return;
+  }
   addUserMessage(text);
   input.value = '';
   clearError();
@@ -734,7 +775,7 @@ function errorText(error: unknown): string {
             :class="`chat-${message.role}`"
           >
             <template v-if="message.role === 'user'">
-              <div class="bubble user-bubble">{{ message.text }}</div>
+              <div class="bubble user-bubble"><MentionText :text="message.text" /></div>
               <div class="message-time">{{ formatTime(message.timestamp) }}</div>
             </template>
 
@@ -745,7 +786,7 @@ function errorText(error: unknown): string {
                 <span class="message-time">{{ formatTime(message.timestamp) }}</span>
               </div>
               <div class="assistant-text">
-                {{ message.text }}<span v-if="message.streaming" class="stream-cursor" aria-hidden="true"></span>
+                <ReplyMarkdown :text="message.text" /><span v-if="message.streaming" class="stream-cursor" aria-hidden="true"></span>
               </div>
               <details
                 v-if="message.thinking"
@@ -843,14 +884,14 @@ function errorText(error: unknown): string {
         </div>
         <span v-if="state.agent.model && !modelProfiles.length" class="composer-model">{{ state.agent.model }}</span>
       </div>
+      <div class="context-usage" :title="t('context.threshold', { percent: AUTO_COMPACT_PERCENT })">
+        <span>{{ t('context.label') }}</span>
+        <progress v-if="usage?.percent != null" :value="usage.percent" max="100" :aria-label="t('context.label')"></progress>
+        <span v-if="usage?.tokens != null && usage.percent != null">{{ Math.floor(usage.percent * 10) / 10 }}% · {{ usage.tokens.toLocaleString() }} / {{ usage.contextWindow.toLocaleString() }} tokens</span>
+        <span v-else>{{ t('context.pending') }}<template v-if="usage?.contextWindow"> / {{ usage.contextWindow.toLocaleString() }} tokens</template></span>
+      </div>
       <div class="composer-row">
-        <textarea
-          v-model="input"
-          rows="2"
-          :placeholder="t('composer.placeholder')"
-          @keydown.enter.exact.prevent="send"
-          @keydown.esc="abort"
-        ></textarea>
+        <MentionComposer v-model="input" @send="send" @abort="abort" />
         <div class="composer-actions">
           <button v-if="state.running" type="button" class="btn danger" @click="abort">
             {{ t('composer.stop') }}

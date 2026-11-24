@@ -2,7 +2,7 @@
 
 Cocos Creator 3.8.x 的 AI 智能体扩展：节点工作流画板 + Pi Agent + 编辑器控制工具，面向 H5/Web 试玩开发。
 
-> 当前开发阶段：Phase 4 核心（三面板、基础画板、图引擎、Agent/工具节点、内置 `试玩开发计划`、模型凭证）已完成；产物预览/模板导入导出/运行控制细节按 `docs/plan` 后续补齐。
+> 当前开发阶段：Phase 4 核心（三面板、基础画板、图引擎、Agent/工具节点、内置 `试玩项目分析`、模型凭证）已完成；产物预览/模板导入导出/运行控制细节按 `docs/plan` 后续补齐。
 
 ## 运行时依赖（重要）
 
@@ -65,7 +65,7 @@ cocos-ai-agent/
 - **main**：Editor.Message 工具、MCP BridgeServer、图引擎/节点注册表、Pi 进程/RPC、模型 profile、审批。
 - **panel**：单一 `Cocos AI Agent` dockable panel，内部分为画板 / 对话 / Agent 状态三个视图；画板支持工作流列表、节点/连线编辑、平移缩放、检查器和运行日志。
 - **agent/cocos-tools**：Pi 扩展（会话/状态/斜杠命令）。
-- **resources/workflows**：内置 `空白工作流`、`试玩开发计划`；`计划实施`、`打包构建`、`性能检查` 按 Phase 5 增加。
+- **resources/workflows**：内置 `空白工作流`、`试玩项目分析`；`计划实施`、`打包构建`、`性能检查` 按 Phase 5 增加。
 
 ## 已知限制（v0.2）
 

@@ -101,7 +101,7 @@ export const agentNodes: NodeDefinition[] = [
         role: { type: 'string', enum: ['pm', 'designer', 'developer', 'validator'] },
         prompt: { type: 'string', description: '附加任务，支持 {{input}}' },
         systemPrompt: { type: 'string', description: '覆盖角色系统提示词' },
-        modelProfileId: { type: 'string' },
+        reportSections: { type: 'array', items: { type: 'string' }, description: '可选的报告章节，按顺序从 Markdown 二级标题提取为 JSON' },
         provider: { type: 'string' },
         model: { type: 'string' },
       },
@@ -118,7 +118,7 @@ export const agentNodes: NodeDefinition[] = [
         ...agentOverrides(ctx),
       });
       return {
-        outputs: { markdown: result.text, json: parseJson(result.text) ?? { text: result.text } },
+        outputs: { markdown: result.text, json: roleJsonOutput(result.text, ctx.params.reportSections) },
         ...(result.model ? { meta: { model: result.model } } : {}),
       };
     },
@@ -197,6 +197,43 @@ function agentOverrides(ctx: NodeRunContext): {
     ...(model ? { model } : {}),
     ...(thinking ? { thinking } : {}),
   };
+}
+
+/** 有章节约定的报告只生成一次正文，JSON 从同一份正文提取。 */
+export function roleJsonOutput(markdown: string, sections: unknown): unknown {
+  if (!Array.isArray(sections) || !sections.length) return parseJson(markdown) ?? { text: markdown };
+  const titles = sections.filter((item): item is string => typeof item === 'string' && Boolean(item.trim()));
+  if (titles.length !== sections.length || new Set(titles).size !== titles.length) {
+    throw new Error('报告章节需要使用唯一且非空的标题');
+  }
+  const result: Record<string, string> = Object.create(null);
+  const body: string[] = [];
+  let index = -1;
+  let fence = '';
+  function finishSection(): void {
+    if (index < 0) return;
+    const content = body.join('\n').trim();
+    if (!content) throw new Error(`报告章节缺少内容：${titles[index]}`);
+    result[titles[index]] = content;
+    body.length = 0;
+  }
+  for (const line of markdown.split(/\r?\n/)) {
+    const marker = /^ {0,3}(`{3,}|~{3,})/.exec(line)?.[1];
+    const heading = !fence && /^##\s+(.+?)\s*$/.exec(line);
+    if (heading) {
+      finishSection();
+      index++;
+      const title = heading[1].replace(/^\d+[.、．)]\s*/, '').trim();
+      if (title !== titles[index]) throw new Error(`报告章节顺序或标题不符：${heading[1]}`);
+      continue;
+    }
+    if (marker && !fence) fence = marker;
+    else if (marker && marker.startsWith(fence) && line.trim() === marker) fence = '';
+    if (index >= 0) body.push(line);
+  }
+  finishSection();
+  if (index + 1 < titles.length) throw new Error(`报告缺少章节：${titles[index + 1]}`);
+  return result;
 }
 
 function renderTemplate(template: string, input: string): string {

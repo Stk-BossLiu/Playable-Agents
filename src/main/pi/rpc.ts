@@ -199,8 +199,8 @@ export class PiRpcClient extends EventEmitter {
     return this.request({ type: 'get_available_thinking_levels' }, 30_000);
   }
 
-  compact(): Promise<unknown> {
-    return this.request({ type: 'compact' }, 600_000);
+  compact(customInstructions?: string): Promise<unknown> {
+    return this.request({ type: 'compact', customInstructions }, 600_000);
   }
 
   exportHtml(input?: string, output?: string): Promise<{ path?: string; filePath?: string }> {

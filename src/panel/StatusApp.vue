@@ -9,6 +9,7 @@ import type {
   ModelProfilesDTO,
 } from '../shared/models';
 import type { AgentStatus } from '../shared/types';
+import { groupModelProviders, hostnameOf, providerKey, type ProviderGroup } from './model-providers';
 import { request, requestRetry } from './api';
 import { t } from './i18n';
 import { setToast } from './store';
@@ -110,40 +111,7 @@ async function refresh(): Promise<void> {
 
 /* ---------- provider 分组 ---------- */
 
-interface ProviderGroup {
-  key: string;
-  name: string;
-  baseUrl: string;
-  apiType: ModelApiType;
-  profiles: ModelProfileView[];
-}
-
-const providerGroups = computed<ProviderGroup[]>(() => {
-  const groups = new Map<string, ModelProfileView[]>();
-  for (const profile of models.value?.profiles ?? []) {
-    // 同一个 baseURL 下可能配置了不同凭证的多个提供商，必须把 providerName 作为身份的一部分。
-    const key = providerKey(
-      profile.providerName ?? '',
-      profile.baseUrl,
-      profile.apiType,
-    );
-    const list = groups.get(key) ?? [];
-    list.push(profile);
-    groups.set(key, list);
-  }
-  return [...groups.entries()].map(([key, profiles]) => ({
-    key,
-    name: providerDisplayName(profiles),
-    baseUrl: profiles[0]?.baseUrl ?? '',
-    apiType: (profiles[0]?.apiType ?? 'openai-completions') as ModelApiType,
-    profiles,
-  }));
-});
-
-function providerKey(name: string, baseUrl: string, apiType: string): string {
-  const trimmed = name.trim();
-  return trimmed ? `${trimmed}||${baseUrl}||${apiType}` : `${baseUrl}||${apiType}`;
-}
+const providerGroups = computed(() => groupModelProviders(models.value?.profiles ?? []));
 
 const activeGroup = computed(
   () => providerGroups.value.find((group) => group.key === activeGroupKey.value) ?? null,
@@ -163,34 +131,6 @@ const providerBaseUrl = computed(() => {
   if (modalMode.value === 'provider') return providerForm.baseUrl;
   return activeGroup.value?.baseUrl ?? activeModel.value?.baseUrl ?? '';
 });
-
-function profileProviderPrefix(profile: ModelProfileView): string {
-  const suffix = profile.modelId ? ` · ${profile.modelId}` : '';
-  return suffix && profile.name.endsWith(suffix)
-    ? profile.name.slice(0, -suffix.length).trim()
-    : profile.name.trim();
-}
-
-function hostnameOf(value: string): string {
-  try {
-    return new URL(value).hostname || value;
-  } catch {
-    return value;
-  }
-}
-
-function providerDisplayName(profiles: ModelProfileView[]): string {
-  const explicit = profiles.map((profile) => profile.providerName).find((name) => Boolean(name));
-  if (explicit) return String(explicit);
-  const prefixes = new Set(profiles.map(profileProviderPrefix).filter(Boolean));
-  if (prefixes.size === 1) return [...prefixes][0];
-  const baseUrl = profiles[0]?.baseUrl ?? '';
-  try {
-    return new URL(baseUrl).hostname || baseUrl || profiles[0]?.name || 'Provider';
-  } catch {
-    return baseUrl || profiles[0]?.name || 'Provider';
-  }
-}
 
 function isProviderOpen(key: string): boolean {
   return Boolean(expandedProviders.value[key]);
@@ -604,7 +544,12 @@ function errorText(caught: unknown): string {
       <section class="status-section">
         <div class="side-head">
           <h2>{{ t('status.dependencies') }}</h2>
-          <span class="muted">{{ dependencies?.checkedAt ? new Date(dependencies.checkedAt).toLocaleTimeString() : '' }}</span>
+          <div class="topbar-actions">
+            <span v-if="dependencies" class="muted">{{ new Date(dependencies.checkedAt).toLocaleTimeString() }}</span>
+            <button type="button" class="link-btn" :disabled="loading" @click="refresh">
+              {{ t(loading ? 'status.checking' : 'status.recheck') }}
+            </button>
+          </div>
         </div>
         <div class="dependency-list">
           <div v-for="item in dependencies?.items ?? []" :key="item.id" class="dependency-row">
@@ -617,7 +562,7 @@ function errorText(caught: unknown): string {
               </div>
               <div v-if="item.path" class="dependency-path">{{ item.path }}</div>
               <div v-if="item.message" class="dependency-message">{{ item.message }}</div>
-              <div v-if="item.action" class="dependency-action">{{ item.action }}</div>
+              <div v-if="item.action" class="dependency-action">{{ t('status.suggestion', { action: item.action }) }}</div>
             </div>
             <span class="dependency-state" :class="statusClass(item.state)">{{ stateLabel(item.state) }}</span>
           </div>

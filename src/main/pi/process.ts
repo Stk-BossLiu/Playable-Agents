@@ -20,6 +20,7 @@ export interface AgentSpawnOptions {
   noBuiltinTools?: boolean;
   env?: Record<string, string | undefined>;
   resume?: boolean;
+  ephemeral?: boolean;
 }
 
 export interface AgentProcessSnapshot {
@@ -162,7 +163,8 @@ export class AgentProcessManager extends EventEmitter {
     }
     if (options.noBuiltinTools) args.push('--no-builtin-tools');
     if (options.tools) args.push('--tools', options.tools);
-    if (options.resume) args.push('--continue');
+    if (options.ephemeral) args.push('--no-session');
+    else if (options.resume) args.push('--continue');
 
     return args;
   }

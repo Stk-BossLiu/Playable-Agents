@@ -87,6 +87,7 @@ export interface AgentSessionSummary {
 }
 
 export interface AgentStatus {
+  compacting?: boolean;
   running: boolean;
   pid?: number;
   startedAt?: number;
